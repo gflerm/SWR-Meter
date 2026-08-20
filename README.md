@@ -1,29 +1,50 @@
-# Uno R4 Minima / RigExpert AA-30 Zero Interface
+# Uno R4 Minima / RigExpert AA-30 Zero SWR Meter
 
-This project documents the hardware and software required to bridge the communication between an Arduino Uno R4 Minima and a RigExpert AA-30 Zero analyzer.
+Software Standing Wave Ratio (SWR) Meter for testing antennas in the High Frequency (HF) bands (160m to 10m), built on an Arduino Uno R4 Minima with a RigExpert AA-30 Zero RF Analyzer.
+
+## 💡 Project Scope
+The system combines the Uno R4 Minima, the AA-30 Zero RF Analyzer, and a display unit to measure and display real-time SWR, Resistance (R), and Reactance (X) values across the specified HF frequency range (160m to 10m).
 
 ## 🛠️ Hardware Components
 *   **UNO R4 Minima:** The main microcontroller board.
 *   **AA-30 Zero:** The RF analyzer (Communicates via UART at 38400 baud).
-*   **Wiring:** Connecting the specified pins mentioned in the current implementation.
+*   **Display Unit:** To be selected (TBD).
+*   **Control Buttons:** Four physical momentary push buttons:
+    1. **Start Scan**
+    2. **Mode Select**
+    3. **Band Select**
+    4. **Calibration**
+*   **Wiring:** Connectors bridging the components.
 
 ## 📡 Communication Protocol
 The AA-30 Zero uses UART at 38400 baud and supports multiple measured systems (25, 50, 75, 100 Ohm).
 
 ### Dual-Channel Bridging Setup
-The system uses two separate software serial connections on the Uno R4 Minima to manage two independent communication channels:
+The system uses two separate software serial connections on the Uno R4 Minima:
+*   **Channel 1:** D1 (RX) <--> D0 (TX)
+*   **Channel 2:** D7 (RX) <--> D4 (TX)
 
-| Channel | Uno Pin RX (Data In) | Uno Pin TX (Data Out) | Purpose |
-| :--- | :--- | :--- | :--- |
-| **Channel 1** | D1 | D0 | First data stream |
-| **Channel 2** | D7 | D4 | Second data stream |
+### AA-30 Zero Command Protocol
+The AA-30 Zero communicates via specific command strings over UART, sent in a precise sequential order:
 
-## 💾 Software Implementation (Arduino Sketch)
-The bridge logic is contained in `AA30_Bridge/AA30_Bridge.ino`. This sketch utilizes the `#include <SoftwareSerial.h>` library to manage two independent 38400 baud serial connections.
+| Command | Description | Purpose |
+| :--- | :--- | :--- |
+| `VER` | Returns analyzer type and firmware version. | Verification after power-up. |
+| `XXXfqXXXXXXXXX` | Sets the center frequency (MHz). | Centers the measurement. |
+| `swXXXXXXXXX` | Sets the sweep frequency range (Hz). | Defines the measurable bandwidth. |
+| `frxNNNN` | Performs N measurements. | Executes the physical scan. |
+| `output` | Configures output format. | Ensures continuous CSV stream: `Frequency,R,X\r\n`. |
 
-*   **Goal:** Receive data from both AA-30 Zero channels and relay it back to the computer serial monitor for monitoring. It also relays commands sent from the monitor to both devices.
-*   **Key Files:** `AA30_Bridge.ino`
+### Operational Command Flow
+`IDLE` → `CALIBRATE` → (Band Select → Frequency Set → Sweep Range Set) → `SCANNING` → `DISPLAYING` → `IDLE`
+
+## 💾 Software Implementation
+*   **Core Logic:** `AA30_Bridge.ino` implements a state machine approach managing the command sequence, data parsing, and SWR calculation.
+*   **Reference:** The `images/protocol.jpg` shows the wiring diagram; a Processing reference sketch demonstrates SWR calculation from raw R and X values.
 
 ## 🚀 Next Steps
-1.  **Testing:** Connect the hardware and upload/test the sketch by using the Serial Monitor (9600 baud) to send test commands.
-2.  **Command Definition:** Implement specific logic to interpret the incoming data (e.g., SWR, R, X values) and respond with necessary commands to control the AA-30 Zero.
+1.  **[CRITICAL] Select Display:** Finalize the display hardware choice.
+2.  **[HIGH PRIORITY] State Machine & Workflow:** Implement the state machine logic for the full measurement workflow.
+3.  **[HIGH PRIORITY] Band Control & Calibration:** Implement communication logic for band selection and calibration.
+4.  **[HIGH PRIORITY] Data Processing:** Implement robust CSV stream parsing and SWR calculation.
+5.  **[LOW PRIORITY] Verification:** Test the entire sequence using simulated data.
