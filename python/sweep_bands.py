@@ -1,22 +1,20 @@
-"""Sweep each HF amateur band (160m-10m) with the AA-30.ZERO and record results.
+"""Sweep each HF amateur band (Region 1, 160m-10m) with the AA-30.ZERO and record results.
 
-The Uno R4 bridge (AA30_Bridge.ino) validates each frx measurement and prints it
-on the PC console as:  F=<MHz>MHz R=<ohms> X=<ohms> SWR=<swr>
-This script drives the bridge, parses those validated lines, and writes result.md.
+The R4 bridge (AA30_Bridge.ino) validates each frx measurement and prints it on the
+PC console as:  F=<MHz>MHz R=<ohms> X=<ohms> SWR=<swr>
+This script drives the bridge, reassembles its lines across read boundaries to avoid
+losing split points, confirms each command's OK, verifies the point count, and writes
+result.md + result_data.json next to this script (i.e. the project root).
+
+Usage:  python sweep_bands.py [PORT]     PORT defaults to COM8
 """
-import serial, time, re, statistics, json, sys
+import os, re, sys, time, statistics, json
 
-# Windows console is cp1252; force UTF-8 so Ω/unicode prints don't crash.
-try:
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
-except Exception:
-    pass
-
-PORT = "COM8"
-BAUD = 9600
-POINTS = 100             # frx99 -> n+1 = 100 sample points per band
-MAX_HW_POINTS = 700      # analyzer max ~700 points (frx700 OK, frx800 stalls)
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # project root
+PORT = sys.argv[1] if len(sys.argv) > 1 else "COM8"
+BAUD = 115200
+POINTS = 100            # frx99 -> n+1 = 100 samples per band
+MAX_HW_POINTS = 700     # analyzer max ~700 points (frx700 OK, frx800 stalls)
 
 # IARU Region 1 amateur HF band plan (band name, low edge Hz, high edge Hz)
 BANDS = [
@@ -32,112 +30,155 @@ BANDS = [
     ("10m",  28_000_000, 29_700_000),
 ]
 
-LINE_RE = re.compile(r"F=([0-9.]+)MHz R=([0-9.]+) X=([-0-9.]+) SWR=([0-9.]+)")
+LINE_RE = re.compile(r"F=([0-9.]+)MHz R=([0-9.]+) X=(-?[0-9.]+) SWR=([0-9.]+)")
 
-def drain_until_idle(ser, wait=0.5):
-    time.sleep(wait)
-    out = b""
-    while ser.in_waiting:
-        out += ser.read(4096)
-    return out.decode(errors="replace")
 
-def send_and_wait(ser, cmd, delay=0.6):
-    ser.reset_input_buffer()
-    ser.write(cmd.encode())
-    ser.flush()
-    return drain_until_idle(ser, delay)
+class Stream:
+    """Buffered line reader that reassembles lines split across serial reads."""
 
-def do_sweep(ser, name, low, high):
+    def __init__(self, ser):
+        self.ser = ser
+        self.buf = b""
+
+    def reset(self):
+        self.ser.reset_input_buffer()
+        self.buf = b""
+
+    def readline(self, timeout):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            idx = self.buf.find(b"\n")
+            if idx >= 0:
+                line = self.buf[:idx]
+                self.buf = self.buf[idx + 1:]
+                return line.decode(errors="replace").strip()
+            if self.ser.in_waiting:
+                self.buf += self.ser.read(self.ser.in_waiting)
+            else:
+                time.sleep(0.01)
+        return None
+
+    def wait_ok(self, timeout=8.0):
+        """Reads lines until one containing OK is seen; raises on timeout."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            line = self.readline(1.0)
+            if line is None:
+                continue
+            if "OK" in line:
+                return True
+        raise TimeoutError("no OK from analyzer")
+
+
+def send_ok(st, text):
+    st.reset()
+    st.ser.write(text.encode())
+    st.ser.flush()
+    st.wait_ok()
+
+
+def expect_response(st, timeout=4.0):
+    """Reads one non-empty line (e.g. the ver version string); None on timeout."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        line = st.readline(1.0)
+        if line:
+            return line
+    return None
+
+
+def sweep_band(st, name, low, high):
     center = (low + high) // 2
-    width = high - low
-    send_and_wait(ser, "fq%d\r\n" % center)
-    send_and_wait(ser, "sw%d\r\n" % width)
-    ser.reset_input_buffer()
-    ser.write(b"frx%d\r\n" % (POINTS - 1))
-    ser.flush()
+    span = high - low
+    send_ok(st, "fq%d\r\n" % center)
+    send_ok(st, "sw%d\r\n" % span)
 
-    data = []
+    st.reset()
+    st.ser.write(b"frx%d\r\n" % (POINTS - 1))
+    st.ser.flush()
+
+    pts = []
     deadline = time.time() + 30.0
-    while time.time() < deadline and len(data) < POINTS:
-        time.sleep(0.4)
-        chunk = ser.read(8192).decode(errors="replace")
-        for m in LINE_RE.finditer(chunk):
-            data.append((float(m.group(1)), float(m.group(2)),
-                         float(m.group(3)), float(m.group(4))))
-        if len(data) >= POINTS:
+    while time.time() < deadline and len(pts) < POINTS:
+        line = st.readline(5.0)
+        if line is None:
             break
-    data = data[:POINTS]
-    # safety: refetch if short (occasionally a chunk straddles the split)
-    tries = 0
-    while len(data) < POINTS and tries < 8:
-        tries += 1
-        time.sleep(0.5)
-        chunk = ser.read(8192).decode(errors="replace")
-        for m in LINE_RE.finditer(chunk):
-            data.append((float(m.group(1)), float(m.group(2)),
-                         float(m.group(3)), float(m.group(4))))
-        data = data[:POINTS]
-    return data
+        if "OK" in line:
+            break
+        m = LINE_RE.search(line)
+        if m:
+            pts.append((float(m.group(1)), float(m.group(2)),
+                        float(m.group(3)), float(m.group(4))))
 
-def write_json(results):
-    """Save raw per-band data so the graph script can read it without re-sweeping."""
-    payload = {}
-    for name, low, high in BANDS:
-        data = results.get(name, [])
-        payload[name] = {
-            "low": low, "high": high,
-            "points": [{"f": d[0], "r": d[1], "x": d[2], "swr": d[3]} for d in data],
-        }
-    with open("result_data.json", "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=2)
-    print("Wrote result_data.json")
+    if len(pts) != POINTS:
+        raise RuntimeError(f"{name}: expected {POINTS} points, got {len(pts)}")
+    return pts
 
-def main():
-    ser = serial.Serial(PORT, BAUD, timeout=1.0)
-    time.sleep(2.0)
-    send_and_wait(ser, "ver\r\n")
-
-    results = {}
-    for name, low, high in BANDS:
-        data = do_sweep(ser, name, low, high)
-        results[name] = data
-        print(f"{name}: {len(data)} points   " +
-              (f"R~{statistics.mean(d[1] for d in data):.1f} " if data else ""))
-
-    ser.close()
-    write_markdown(results)
-    write_json(results)
-
-def fmt(x):
-    return "%.3f" % x
 
 def write_markdown(results):
-    lines = []
-    lines.append("# AA-30.ZERO Band Sweep Results")
-    lines.append("")
-    lines.append("50 Ω reference load on the RF connector.")
-    lines.append(f"Each band sampled at {POINTS} points via the R4 bridge (hardware Serial1 @ 38400).")
-    lines.append("")
-    lines.append("| Band | Freq (MHz) | R (Ω) | X (Ω) | SWR |")
-    lines.append("|------|-----------|-------|-------|-----|")
+    lines = [
+        "# AA-30.ZERO Band Sweep Results",
+        "",
+        "50 \u03a9 reference load on the RF connector.",
+        f"Each band sampled at {POINTS} points via the R4 bridge (hardware Serial1 @ 38400).",
+        "IARU Region 1 band plan.",
+        "",
+        "| Band | Freq (MHz) | R (\u03a9) | X (\u03a9) | SWR |",
+        "|------|-----------|-------|-------|-----|",
+    ]
     for name, low, high in BANDS:
-        data = results.get(name, [])
-        for (f, r, x, swr) in data:
+        for (f, r, x, swr) in results.get(name, []):
             lines.append(f"| {name} | {f:.3f} | {r:.1f} | {x:.1f} | {swr:.2f} |")
-        # add a per-band summary row
-        if data:
-            rs = [d[1] for d in data]
-            xs = [d[2] for d in data]
-            sws = [d[3] for d in data]
-            lines.append(f"| **{name} avg** | **--** | **{statistics.mean(rs):.1f}** | "
-                         f"**{statistics.mean(xs):.1f}** | **{statistics.mean(sws):.2f}** |")
+        rs = [d[1] for d in results.get(name, [])] or [0]
+        xs = [d[2] for d in results.get(name, [])] or [0]
+        sws = [d[3] for d in results.get(name, [])] or [0]
+        lines.append(f"| **{name} avg** | **--** | **{statistics.mean(rs):.1f}** | "
+                     f"**{statistics.mean(xs):.1f}** | **{statistics.mean(sws):.2f}** |")
     lines.append("")
-    lines.append("_Measured with a 50 Ω dummy load: R should read ≈50 Ω, X ≈ 0 Ω, SWR ≈ 1.0._")
-    lines.append("")
-    text = "\n".join(lines)
-    with open("result.md", "w", encoding="utf-8") as fh:
-        fh.write(text)
-    print("Wrote result.md")
+    lines.append("_Measured with a 50 \u03a9 dummy load: R \u2248 50 \u03a9, X \u2248 0 \u03a9, SWR \u2248 1.0._")
+    with open(os.path.join(BASE, "result.md"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def write_json(results):
+    payload = {
+        name: {
+            "low": low, "high": high,
+            "points": [{"f": d[0], "r": d[1], "x": d[2], "swr": d[3]} for d in results[name]],
+        }
+        for name, low, high in BANDS if results.get(name)
+    }
+    with open(os.path.join(BASE, "result_data.json"), "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2)
+
+
+def main():
+    import serial
+    ser = serial.Serial(PORT, BAUD, timeout=1.0)
+    st = Stream(ser)
+    results = {}
+    try:
+        time.sleep(2.0)
+        st.reset()
+        st.ser.write(b"ver\r\n")
+        st.ser.flush()
+        ver = expect_response(st, 8.0)
+        if ver:
+            print(f"Analyzer: {ver}")
+        else:
+            print("WARNING: no response to ver")
+
+        for name, low, high in BANDS:
+            results[name] = sweep_band(st, name, low, high)
+            rs = [d[1] for d in results[name]]
+            print(f"{name}: {len(results[name])} points   R~{statistics.mean(rs):.1f}")
+    finally:
+        ser.close()
+
+    write_markdown(results)
+    write_json(results)
+    print(f"Wrote {os.path.join(BASE, 'result.md')} and result_data.json")
+
 
 if __name__ == "__main__":
     main()

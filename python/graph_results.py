@@ -5,18 +5,27 @@ Produces:
   - One combined multi-page PDF: graphs/AA-30_ZERO_all_bands.pdf
 Formatted with titled heads, axis units, SWR reference lines and a footer.
 """
-import json, os, datetime, matplotlib
+import json, os, sys, datetime, matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.backends.backend_pdf import PdfPages
 
-JSON = "result_data.json"
-OUT_DIR = "graphs"
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+JSON = os.path.join(BASE, "result_data.json")
+OUT_DIR = os.path.join(BASE, "graphs")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 LOAD_NOTE = "Reference load: 50 \u03a9 | Points per band: 100 | IARU Region 1 bands"
 GENERATED = datetime.date.today().isoformat()
+
+try:
+    with open(JSON, encoding="utf-8") as fh:
+        DATA = json.load(fh)
+except FileNotFoundError:
+    sys.exit(f"Missing {JSON} - run python/sweep_bands.py first.")
+except json.JSONDecodeError as exc:
+    sys.exit(f"Malformed {JSON}: {exc}")
 
 plt.rcParams.update({
     "font.size": 10,
@@ -107,9 +116,6 @@ def make_cover():
     cover.text(0.5, 0.10, LOAD_NOTE, fontsize=10, ha="center", color="#333333")
     cover.text(0.5, 0.06, f"Generated {GENERATED}", fontsize=9, ha="center", color="#777777")
     return cover
-
-with open(JSON, encoding="utf-8") as fh:
-    DATA = json.load(fh)
 
 for name, meta in DATA.items():
     if not meta["points"]:

@@ -5,6 +5,8 @@ analyzer to measure and display Standing Wave Ratio (SWR), Resistance (R) and Re
 across the HF amateur bands (160 m → 10 m). The AA-30.ZERO works as an Arduino shield
 (UART @ 38400 baud) and is a 5 V device.
 
+![RigExpert AA-30.ZERO board assembly](media/aa30_zero_assembly.jpeg)
+
 ## ✅ Status
 
 - **Communication verified working** (`ver` → `AA-30.ZERO 200`, `fq`/`sw` → `OK`, `frx` → `freq,R,X` stream).
@@ -80,6 +82,10 @@ Sweep results (IARU Region 1, 100 points/band, 50 Ω load):
   [`17m.pdf`](graphs/17m.pdf) · [`15m.pdf`](graphs/15m.pdf) · [`12m.pdf`](graphs/12m.pdf) · [`10m.pdf`](graphs/10m.pdf)
 - Combined, all bands in one PDF: [`graphs/AA-30_ZERO_all_bands.pdf`](graphs/AA-30_ZERO_all_bands.pdf)
 
+## 🖼️ Media
+
+See the assembly photo above. Demo video: [AA-30.ZERO demo](media/aa30_zero_demo.mp4)
+
 ## 📚 Documentation (`docs/`)
 
 - [`AA-30_ZERO_schematics_and_drawings.pdf`](docs/AA-30_ZERO_schematics_and_drawings.pdf) — official schematics & BOM
@@ -94,7 +100,7 @@ arduino-cli compile --fqbn arduino:renesas_uno:minima AA30_Bridge
 arduino-cli upload --fqbn arduino:renesas_uno:minima --port COM8 AA30_Bridge
 ```
 
-USB CDC console: 9600 baud. AA-30 UART: 38400 baud (`Serial1`).
+USB CDC console: 115200 baud. AA-30 UART: 38400 baud (`Serial1`).
 
 ## 🚀 Next Steps
 
