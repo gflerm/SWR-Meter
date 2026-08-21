@@ -2,11 +2,19 @@
 //
 // UART Bridge for data exchange between
 // RigExpert AA-30 ZERO antenna & cable analyzer and Arduino Uno R4 Minima
-// Supports dual-channel communication (D1/D0 and D7/D4) and button control.
+//
+// NOTE (verified working): The AA-30.ZERO has two UARTs. On the Uno R4 Minima
+// the ONLY reliable path is hardware Serial1 (D0 = RX, D1 = TX), which talks
+// to the analyzer's UART1 interface. The R4's SoftwareSerial cannot drive the
+// D4/D7 pins the analyzer's default UART2 uses (SoftwareSerial.begin() fails),
+// so do NOT use SoftwareSerial with this board/analyzer combination.
+//
+//   AA-30.ZERO UART1 TX  ->  Uno D0  (Serial1 RX)
+//   AA-30.ZERO UART1 RX  ->  Uno D1  (Serial1 TX)
+//   AA-30.ZERO GND       ->  Uno GND (common ground required)
 //
 // 2024, opencode AI
 //
-#include <SoftwareSerial.h>
 
 // ======================================================================
 // HARDWARE DEFINITIONS
@@ -16,12 +24,32 @@
 #define START_PIN 2 // Button Start Measurement
 #define MODE_PIN  3 // Button Mode Select
 
-// Define SoftwareSerial ports based on the specified pins
-// Channel 1: D1 (RX) <--> D0 (TX)
-SoftwareSerial ss1(D1, D0); 
+// AA-30 ZERO UART port (interface UART1 on hardware Serial1, D0/D1).
+// Serial1: RX = D0, TX = D1.
+#define AA_PORT Serial1
 
-// Channel 2: D7 (RX) <--> D4 (TX)
-SoftwareSerial ss2(D7, D4); 
+// System impedance used for SWR math (AA-30 uses 50 ohm by default).
+#define Z0 50.0f
+
+// Validation limits for rejecting bogus readings.
+// A real antenna/load rarely exceeds these; bogus values (e.g. R = 50,455,205
+// seen from a bad frx0 point) or NaN/Inf get discarded.
+#define MAX_RESISTANCE 1000000.0f // ohms
+#define MAX_REACTANCE  1000000.0f // ohms
+#define MAX_SWR        100.0f     // physically impossible above this for HF
+
+// A single validated measurement point from the AA-30 frx stream.
+struct Measurement {
+  float freqMHz; // frequency (MHz)
+  float r;       // series resistance (ohm)
+  float x;       // series reactance (ohm)
+  float swr;     // computed standing wave ratio
+  bool  valid;   // true only if it passed all checks
+};
+
+#define MAX_POINTS 256
+Measurement scanPoints[MAX_POINTS];
+uint16_t scanCount = 0;
 
 // Placeholder for Display Library (e.g., <Wire.h>, <Adafruit_GFX.h>)
 // #include <DisplayLibrary.h>
@@ -45,10 +73,9 @@ void setup() {
   pinMode(START_PIN, INPUT_PULLUP);
   pinMode(MODE_PIN, INPUT_PULLUP);
 
-  // 2. Initialize Serial Bridges
-  ss1.begin(38400);
-  ss2.begin(38400);
-  
+  // 2. Initialize AA-30 UART (hardware Serial1, UART1 interface @ 38400)
+  AA_PORT.begin(38400);
+
   // 3. Initialize Debug/PC Serial
   Serial.begin(9600); 
   
@@ -66,9 +93,80 @@ void loop() {
 
   // State Machine execution
   handleStateMachine(startButtonPressed, modeButtonPressed);
-  
+
+  // Always bridge AA-30 <--> PC serial data (enables test/console comms)
+  handleSerialData();
+
   // General delay to manage loop rate
   delay(10);
+}
+
+// ======================================================================
+// DATA PARSING & VALIDATION
+// ======================================================================
+
+/**
+ * @brief Rejects physically impossible / bogus readings (NaN, Inf, or absurd
+ *        magnitudes such as R = 50 million ohms).
+ */
+bool isValidReading(float r, float x) {
+  if (!isfinite(r) || !isfinite(x)) return false;
+  if (r <= 0.0f || r > MAX_RESISTANCE) return false;
+  if (fabsf(x) > MAX_REACTANCE) return false;
+  return true;
+}
+
+/**
+ * @brief Computes SWR from series R and X at impedance Z0.
+ * @return SWR, or a large sentinel value if the formula is degenerate.
+ */
+float computeSWR(float r, float x) {
+  float num = sqrtf((r - Z0) * (r - Z0) + x * x);
+  float den = sqrtf((r + Z0) * (r + Z0) + x * x);
+  if (den <= 0.0f) return MAX_SWR + 1.0f; // degenerate -> reject
+  float gamma = num / den;
+  float d = 1.0f - gamma;
+  if (d <= 0.0f) return MAX_SWR + 1.0f;   // reflection coefficient ~1 -> reject
+  return (1.0f + gamma) / d;
+}
+
+/**
+ * @brief Parses and validates an AA-30 data line: "freqMHz,R,X"
+ * @return true and fills `m` only if the reading is physically plausible.
+ */
+bool parseFRXLine(const char* line, Measurement& m) {
+  // 3 comma-separated fields: fq,R,X (fq in MHz).
+  char buf[64];
+  strncpy(buf, line, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+
+  char* p1 = strchr(buf, ',');
+  if (!p1) return false;
+  *p1 = '\0';
+  char* p2 = strchr(p1 + 1, ',');
+  if (!p2) return false;
+  *p2 = '\0';
+
+  m.freqMHz = atof(buf);
+  m.r      = atof(p1 + 1);
+  m.x      = atof(p2 + 1);
+  m.swr    = computeSWR(m.r, m.x);
+
+  m.valid = isValidReading(m.r, m.x)
+         && m.freqMHz >= 0.0f
+         && m.swr >= 1.0f          // SWR can never be below 1
+         && m.swr <= MAX_SWR;
+
+  return m.valid;
+}
+
+/**
+ * @brief Stores a validated measurement point for later display/processing.
+ */
+void storePoint(const Measurement& m) {
+  if (scanCount < MAX_POINTS) {
+    scanPoints[scanCount++] = m;
+  }
 }
 
 // ======================================================================
@@ -90,21 +188,19 @@ void handleStateMachine(bool startPressed, bool modePressed) {
     case STATE_SELECT_BAND:
       // Logic to check mode button press to cycle bands (e.g., 160m, 20m, 10m)
       // For now, just show selection state
-      updateDisplay(startPressed, modeButtonPressed);
+      updateDisplay(startPressed, modePressed);
       break;
 
     case STATE_SCANNING:
-      // Send commands and process streaming data
-      handleSerialData();
       // Check if the AA-30 is finished scanning (requires parsing the output)
       // If finished: currentState = STATE_DISPLAYING;
-      updateDisplay(startPressed, modeButtonPressed);
+      updateDisplay(startPressed, modePressed);
       
       break;
 
     case STATE_DISPLAYING:
       // Display the final processed data
-      updateDisplay(startPressed, modeButtonPressed);
+      updateDisplay(startPressed, modePressed);
       // Wait for an external trigger or duration to loop back to IDLE
       // To loop: currentState = STATE_IDLE;
       break;
@@ -130,33 +226,48 @@ void displayWelcome() {
 }
 
 /**
- * @brief Reads data from both serial bridges and routes the communication.
+ * @brief Bridges data between the AA-30 ZERO (Serial1) and the PC (Serial),
+ *        buffering incoming lines, validating measurements, and computing SWR.
  */
 void handleSerialData() {
-  // 1. From AA-30 Zero to PC (Monitoring)
-  if (ss1.available()) {
-    char data = ss1.read();
-    Serial.print("[Ch1] ");
-    Serial.write(data);
+  // Accumulate one line of AA-30 output at a time.
+  static String aaLine;
+
+  // 1. From AA-30 Zero to PC
+  while (AA_PORT.available()) {
+    char c = AA_PORT.read();
+
+    if (c == '\n') {
+      aaLine.trim();
+      if (aaLine.length() > 0) {
+        Measurement m;
+        if (parseFRXLine(aaLine.c_str(), m)) {
+          storePoint(m);
+          // Summarise only valid points to the console.
+          char buf[64];
+          snprintf(buf, sizeof(buf),
+                   "F=%.3fMHz R=%.1f X=%.1f SWR=%.2f",
+                   m.freqMHz, m.r, m.x, m.swr);
+          Serial.println(buf);
+        } else if (aaLine.equalsIgnoreCase("OK")) {
+          Serial.println("<AA-30 OK>");
+        } else if (aaLine.indexOf(',') < 0) {
+          // Non-data response (e.g. "AA-30.ZERO 200"): show as-is.
+          Serial.println("<AA-30> " + aaLine);
+        } else {
+          // A data-shaped line that failed validation -> discard (bogus).
+          Serial.println("<AA-30 BOGUS, discarded> " + aaLine);
+        }
+      }
+      aaLine = "";
+    } else {
+      aaLine += c;
+    }
   }
 
-  // Check Channel 2
-  if (ss2.available()) {
-    char data = ss2.read();
-    Serial.print("[Ch2] ");
-    Serial.write(data);
-  }
-
-  // 2. From PC to AA-30 Zero (Commanding)
-  if (Serial.available()) {
-    char data = Serial.read();
-    Serial.print("[TX/PC] ");
-    Serial.write(data);
-
-    // Send data to both channels for testing
-    ss1.write(data); 
-    ss2.write(data);
-    Serial.println(" (Wrote to both channels)");
+  // 2. From PC to AA-30 Zero
+  while (Serial.available()) {
+    AA_PORT.write(Serial.read());
   }
 }
 
@@ -175,8 +286,8 @@ void sendBandCommand(float band, const char* bandUnit) {
   Serial.print("Commanding AA-30 Zero to set band to: ");
   Serial.println(command);
   
-  // Send command over the primary channel (Channel 1)
-  ss1.print(command); 
+  // Send command over the AA-30 UART (Serial1)
+  AA_PORT.print(command); 
 }
 
 /**
