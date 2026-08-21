@@ -21,3 +21,7 @@ Thumbs.db
 # Temp / scratch
 *.tmp
 *.log
+
+# Generated sweep results (regenerate with python\sweep_bands.py)
+result.md
+result_data.json
