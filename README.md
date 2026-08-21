@@ -97,7 +97,7 @@ See the assembly photo above. Demo video: [AA-30.ZERO demo](media/aa30_zero_demo
 
 ```sh
 arduino-cli compile --fqbn arduino:renesas_uno:minima AA30_Bridge
-arduino-cli upload --fqbn arduino:renesas_uno:minima --port COM8 AA30_Bridge
+arduino-cli upload --fqbn arduino:renesas_uno:minima --port COMxx AA30_Bridge
 ```
 
 USB CDC console: 115200 baud. AA-30 UART: 38400 baud (`Serial1`).

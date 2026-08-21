@@ -5,13 +5,13 @@ and the AA-30 (hardware Serial1 @ 38400). Sending a command from this script is
 translated to the AA-30 and its reply is forwarded back here.
 
 Usage:
-    python test_aa30.py [PORT]   e.g. python test_aa30.py COM8
+    python test_aa30.py [PORT]   e.g. python test_aa30.py COMxx
 """
 import sys
 import time
 import serial
 
-PORT = sys.argv[1] if len(sys.argv) > 1 else "COM8"
+PORT = sys.argv[1] if len(sys.argv) > 1 else "COMxx"
 BAUD = 115200  # must match PC_BAUD in AA30_Bridge.ino
 
 print(f"Opening {PORT} @ {BAUD} ...", flush=True)

@@ -6,12 +6,12 @@ This script drives the bridge, reassembles its lines across read boundaries to a
 losing split points, confirms each command's OK, verifies the point count, and writes
 result.md + result_data.json next to this script (i.e. the project root).
 
-Usage:  python sweep_bands.py [PORT]     PORT defaults to COM8
+Usage:  python sweep_bands.py [PORT]     PORT defaults to COMxx
 """
 import os, re, sys, time, statistics, json
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # project root
-PORT = sys.argv[1] if len(sys.argv) > 1 else "COM8"
+PORT = sys.argv[1] if len(sys.argv) > 1 else "COMxx"
 BAUD = 115200
 POINTS = 100            # frx99 -> n+1 = 100 samples per band
 MAX_HW_POINTS = 700     # analyzer max ~700 points (frx700 OK, frx800 stalls)
