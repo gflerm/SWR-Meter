@@ -1,4 +1,4 @@
-// AA30_Bridge.ino
+// main.cpp
 //
 // UART Bridge between a RigExpert AA-30.ZERO antenna & cable analyzer and an
 // Arduino Uno R4 Minima, with a Waveshare 2.4" ILI9341 SPI display and four
@@ -61,6 +61,7 @@
 // ======================================================================
 // INCLUDES
 // ======================================================================
+#include <Arduino.h>
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
@@ -127,6 +128,20 @@ uint16_t    scanCount     = 0;
 char      lineBuf[LINE_BUF];
 uint8_t   lineLen = 0;
 bool      collecting = false;  // true while awaiting frx data
+
+// ======================================================================
+// FORWARD DECLARATIONS
+// (A .ino auto-generates these; a .cpp must declare them before use.)
+// ======================================================================
+
+void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, bool calPressed);
+void startScan();
+void pollAnalyzer();
+void processLine(char* line);
+void updateDisplay();
+void displayWelcome();
+void drawCurve(const Band& b);
+void drawNumeric();
 
 // ======================================================================
 // SETUP / LOOP

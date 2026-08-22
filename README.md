@@ -100,7 +100,7 @@ See [`docs/AA-30_ZERO_data_exchange_protocol.md`](docs/AA-30_ZERO_data_exchange_
 
 ## 💾 Software
 
-- **`src/AA30_Bridge.ino`** — serial bridge + state machine. Parses and validates the
+- **`src/main.cpp`** — serial bridge + state machine. Parses and validates the
   `freq,R,X` stream, computes SWR, stores valid points in `scanPoints[]`, then renders them
   to the ILI9341 display (SWR curve or numeric readout) and reads the four buttons.
   Built with **PlatformIO** + Arduino framework (requires **Adafruit_GFX** and
@@ -155,7 +155,7 @@ pio run -t upload        # flash over USB/DFU
 pio run -t monitor       # serial monitor @ 115200
 ```
 
-Config: [`platformio.ini`](platformio.ini); source: `src/AA30_Bridge.ino`. The Adafruit
+Config: [`platformio.ini`](platformio.ini); source: `src/main.cpp`. The Adafruit
 GFX + ILI9341 libraries are pulled automatically via `lib_deps`.
 
 USB CDC console: 115200 baud. AA-30 UART: 38400 baud (`Serial1`).
@@ -170,3 +170,4 @@ USB CDC console: 115200 baud. AA-30 UART: 38400 baud (`Serial1`).
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
+
