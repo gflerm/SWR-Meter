@@ -162,46 +162,42 @@ ax.legend(handles=handles, loc="center left", bbox_to_anchor=(0.005, 0.78),
           ncol=2, fontsize=8, frameon=False)
 
 # --- bottom panel: buttons wiring --------------------------------------
-# Button row occupies the band below the blocks (blocks end at BOX_BOT=18).
-BY = 9.0                        # y of the wire/switch row
-BX = [4, 12, 20, 28]            # x of each button switch
+# A row of compact self-contained columns: switch with the button name and
+# R4 pin close by. Fits in the free band below the blocks (blocks end at 18).
 BTN_LBL = ["START", "BAND", "MODE", "CAL"]
 BTN_PIN = ["D2", "D3", "D4", "D5"]
-BTN_R4X = [52, 60, 68, 76]      # x where each button's net meets the "Uno Dx" label
+SPC = 13.0                      # horizontal spacing between columns
+XS = [6.0 + i * SPC for i in range(4)]  # column centre x
+SW_T, SW_B = 11.6, 9.4          # top/bottom of the switch box
+GY = 6.6                        # y of the shared ground rail
 
-# common ground rail (buttons share one end to GND)
-ax.plot([2, BX[0] + 0.95], [BY - 1.2, BY - 1.2], color=C_GND, lw=1.2, zorder=3)
-ax.text(2.4, BY - 0.7, "GND", ha="left", va="center", fontsize=7, color=C_GND, fontweight="bold")
-
-for i, (lbl, pin, bx, rx) in enumerate(zip(BTN_LBL, BTN_PIN, BX, BTN_R4X)):
-    # switch symbol
-    ax.add_patch(FancyBboxPatch((bx, BY - 1.1), 1.7, 1.5,
-                                boxstyle="round,pad=0.08,rounding_size=0.2",
-                                linewidth=1.1, edgecolor="#263238", facecolor="white", zorder=3))
-    ax.add_patch(FancyArrowPatch((bx + 0.85, BY - 1.1), (bx + 0.85, BY + 1.0),
-                                 arrowstyle="-|>", mutation_scale=6, linewidth=1.1,
-                                 color="#263238", shrinkA=0, shrinkB=0, zorder=3))
-    ax.text(bx + 0.85, BY + 1.4, lbl, ha="center", va="bottom", fontsize=7.2,
-            fontweight="bold", color="#263238", zorder=4)
-    # net to GND rail
-    ax.plot([bx + 0.85, bx + 0.85], [BY - 1.1, BY - 1.2], color=C_GND, lw=1.2, zorder=3)
-    # signal net down to the R4 pin label, then across to its x
-    ax.add_patch(FancyArrowPatch((bx + 0.85, BY - 1.1), (bx + 0.85, BY - 3.2),
-                                 arrowstyle="->", mutation_scale=9, linewidth=1.5,
-                                 color=C_SIG, shrinkA=0, shrinkB=0, zorder=3))
-    ax.plot([bx + 0.85, rx], [BY - 3.2, BY - 3.2], color=C_SIG, lw=1.5, zorder=3)
-    ax.add_patch(FancyArrowPatch((rx, BY - 3.2), (rx, BY - 1.2),
-                                 arrowstyle="->", mutation_scale=9, linewidth=1.5,
-                                 color=C_SIG, shrinkA=0, shrinkB=0, zorder=3))
-    ax.text(rx, BY - 0.6, f"Uno {pin}", ha="center", va="bottom", fontsize=7.6,
-            color=C_SIG, fontweight="bold", zorder=4)
-
-# panel frame + title
-ax.add_patch(FancyBboxPatch((1.0, 13.0), 84.0, 4.2,
+# panel frame + title (title higher, names lower -> no overlap)
+ax.add_patch(FancyBboxPatch((1.5, 0.6), 52.0, 15.0,
                             boxstyle="round,pad=0.3,rounding_size=0.9",
                             linewidth=1.2, edgecolor="#45545f", facecolor="white", zorder=2))
-ax.text(2.4, 13.6, "Buttons (INPUT_PULLUP, active-low) \N{RIGHTWARDS ARROW} Uno R4", ha="left", va="center",
+ax.text(3.0, 14.6, "Buttons  (active-low)", ha="left", va="bottom",
         fontsize=9, fontweight="bold", color="#45545f", zorder=4)
+
+# ground rail shared across all buttons
+ax.plot([XS[0], XS[3]], [GY, GY], color=C_GND, lw=1.3, zorder=3)
+ax.text(XS[3] + 1.0, GY, "GND", ha="left", va="center", fontsize=7.2,
+        color=C_GND, fontweight="bold", zorder=4)
+
+for cx, lbl, pin in zip(XS, BTN_LBL, BTN_PIN):
+    # switch symbol
+    ax.add_patch(FancyBboxPatch((cx - 1.6, SW_B), 3.2, SW_T - SW_B,
+                                boxstyle="round,pad=0.12,rounding_size=0.3",
+                                linewidth=1.2, edgecolor="#263238", facecolor="white", zorder=3))
+    ax.add_patch(FancyArrowPatch((cx, SW_B), (cx, SW_T + 0.5),
+                                 arrowstyle="-|>", mutation_scale=7, linewidth=1.2,
+                                 color="#263238", shrinkA=0, shrinkB=0, zorder=3))
+    # stub to ground rail
+    ax.plot([cx, cx], [SW_B, GY], color=C_GND, lw=1.2, zorder=3)
+    # button name directly above the switch, R4 pin below the ground rail
+    ax.text(cx, SW_T + 0.8, lbl, ha="center", va="bottom", fontsize=7.6,
+            fontweight="bold", color="#263238", zorder=4)
+    ax.text(cx, GY - 0.6, f"Uno {pin}", ha="center", va="top", fontsize=7.4,
+            color=C_SIG, fontweight="bold", zorder=4)
 
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 # Write to a temp file first, then replace, so the target is never half-written
