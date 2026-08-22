@@ -1,18 +1,20 @@
-// uart_bridge.ino
+// AA30_Bridge.ino
 //
 // UART Bridge between a RigExpert AA-30.ZERO antenna & cable analyzer and an
-// Arduino Uno R4 Minima. The AA-30.ZERO has two UARTs; on the R4 the only
-// reliable path is hardware Serial1 (D0 = RX, D1 = TX), which talks to the
-// analyzer's UART1 interface.
+// Arduino Uno R4 Minima, with a Waveshare 2.4" ILI9341 SPI display and four
+// push-button controls.
 //
+// The AA-30.ZERO has two UARTs; on the R4 the only reliable path is hardware
+// Serial1 (D0 = RX, D1 = TX), which talks to the analyzer's UART1 interface.
 // The R4's SoftwareSerial cannot drive the D4/D7 pins the analyzer's default
 // UART2 uses (SoftwareSerial.begin() fails), so UART1 + Serial1 is required.
 //
-// Wiring:
-//   AA-30.ZERO UART1 TX  ->  Uno D0  (Serial1 RX)
-//   AA-30.ZERO UART1 RX  ->  Uno D1  (Serial1 TX)
-//   AA-30.ZERO GND       ->  Uno GND (common ground required)
-//   Analyzer must be set to UART1 (default is UART2 on the board).
+// Pin map (no overlaps):
+//   AA-30   TX -> D0 (Serial1 RX)     AA-30   RX -> D1 (Serial1 TX)
+//   Display CLK -> D13 (SPI SCK)      Display DIN -> D11 (SPI COPI/MOSI)
+//   Display CS  -> D10                Display DC  -> D9
+//   Display RST -> D8                 (BL wired to 3.3 V, not a GPIO)
+//   START -> D2   BAND -> D3   MODE -> D4   CAL -> D5   (INPUT_PULLUP, active-low)
 //
 // 2024, opencode AI
 
@@ -20,19 +22,26 @@
 // HARDWARE DEFINITIONS
 // ======================================================================
 
-// Control buttons (INPUT_PULLUP)
-#define START_PIN 2   // Start measurement
-#define MODE_PIN  3   // Select band
-
-// AA-30 ZERO UART port (interface UART1, hardware Serial1: RX = D0, TX = D1)
+// --- AA-30 ZERO UART (interface UART1, hardware Serial1: RX = D0, TX = D1)
 #define AA_PORT Serial1
-
-// PC console / telemetry port. 115200 keeps the AA-30 -> PC direction from
-// being the bottleneck while streaming many measurement points.
+// PC console / telemetry port. 115200 keeps AA-30 -> PC from being the
+// bottleneck while streaming many measurement points.
 #define PC_BAUD 115200
 
-// System impedance used for SWR math (AA-30 measures in a 50 ohm system by default)
-#define Z0 50.0f
+// --- Display (Waveshare 2.4" SPI, ILI9341 320x240). SPI bus is fixed on the
+//     R4 (MOSI=11, SCK=13); only CS/DC/RST are free to choose.
+#define TFT_CS  10
+#define TFT_DC   9
+#define TFT_RST  8
+
+// --- Control buttons (INPUT_PULLUP, pressed = LOW)
+#define START_PIN 2    // Start a scan of the current band
+#define BAND_PIN  3    // Cycle through the HF bands
+#define MODE_PIN  4    // Toggle display mode (curve / numeric)
+#define CAL_PIN   5    // Run a one-off calibration scan (re-zero the reference)
+
+// --- AA-30 signal analysis
+#define Z0 50.0f                 // system impedance for SWR math (default 50 ohm)
 
 // Validation limits for rejecting bogus readings (NaN/Inf or absurd magnitudes).
 #define MAX_RESISTANCE 1000000.0f  // ohms
@@ -45,6 +54,18 @@
 // Device-side max points retained for display; reset on every scan.
 #define MAX_POINTS 256
 #define POINTS_PER_SCAN 100   // points requested per band (fits in MAX_POINTS)
+
+// Button debounce (ms).
+#define DEBOUNCE_MS 25
+
+// ======================================================================
+// INCLUDES
+// ======================================================================
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
+
+Adafruit_ILI9341 tft(TFT_CS, TFT_DC, TFT_RST);
 
 // ======================================================================
 // DATA TYPES
@@ -62,6 +83,11 @@ enum SystemState {
   STATE_IDLE,
   STATE_SCANNING,
   STATE_DISPLAYING
+};
+
+enum DisplayMode {
+  MODE_CURVE,   // SWR vs frequency graph
+  MODE_NUMERIC  // big R / X / SWR numbers
 };
 
 // IARU Region 1 HF amateur band plan (band name, low edge Hz, high edge Hz).
@@ -90,8 +116,9 @@ const Band BANDS[] = {
 // GLOBALS
 // ======================================================================
 
-SystemState currentState = STATE_IDLE;
-uint8_t     bandIndex     = 0;
+SystemState  currentState = STATE_IDLE;
+DisplayMode  displayMode  = MODE_CURVE;
+uint8_t      bandIndex    = 0;
 
 Measurement scanPoints[MAX_POINTS];
 uint16_t    scanCount     = 0;
@@ -107,19 +134,35 @@ bool      collecting = false;  // true while awaiting frx data
 
 void setup() {
   pinMode(START_PIN, INPUT_PULLUP);
-  pinMode(MODE_PIN, INPUT_PULLUP);
+  pinMode(BAND_PIN,  INPUT_PULLUP);
+  pinMode(MODE_PIN,  INPUT_PULLUP);
+  pinMode(CAL_PIN,   INPUT_PULLUP);
 
   AA_PORT.begin(38400);   // AA-30 analyzer UART1
   Serial.begin(PC_BAUD);  // PC console / telemetry
+
+  tft.begin();
+  tft.setRotation(1);            // landscape (320x240)
+  tft.fillScreen(ILI9341_BLACK);
 
   displayWelcome();
 }
 
 void loop() {
-  bool startPressed = !digitalRead(START_PIN);
-  bool modePressed  = !digitalRead(MODE_PIN);
+  static uint32_t lastDebounce = 0;
+  uint32_t now = millis();
 
-  handleStateMachine(startPressed, modePressed);
+  bool startPressed = false, bandPressed = false, modePressed = false, calPressed = false;
+  if (now - lastDebounce >= DEBOUNCE_MS) {
+    // Active-low with INPUT_PULLUP: pressed means LOW.
+    startPressed = digitalRead(START_PIN) == LOW;
+    bandPressed  = digitalRead(BAND_PIN)  == LOW;
+    modePressed  = digitalRead(MODE_PIN)  == LOW;
+    calPressed   = digitalRead(CAL_PIN)   == LOW;
+    lastDebounce = now;
+  }
+
+  handleStateMachine(startPressed, bandPressed, modePressed, calPressed);
 
   // Always absorb any analyzer bytes into the line buffer; in scan mode the
   // completion of the stream (a trailing "OK") drives the state transition.
@@ -139,18 +182,29 @@ void loop() {
 // STATE MACHINE
 // ======================================================================
 
-void handleStateMachine(bool startPressed, bool modePressed) {
+void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, bool calPressed) {
   switch (currentState) {
     case STATE_IDLE:
-      // MODE cycles the selected band.
-      if (modePressed) {
+      // BAND cycles the selected HF band.
+      if (bandPressed) {
         bandIndex = (bandIndex + 1) % NUM_BANDS;
         Serial.print("Band selected: ");
         Serial.println(BANDS[bandIndex].name);
       }
+      // MODE toggles the display layout.
+      if (modePressed) {
+        displayMode = (displayMode == MODE_CURVE) ? MODE_NUMERIC : MODE_CURVE;
+        Serial.print("Display mode: ");
+        Serial.println(displayMode == MODE_CURVE ? "curve" : "numeric");
+      }
       // START runs a scan of the current band.
       if (startPressed) {
         startScan();
+      }
+      // CAL re-runs a calibration scan (same command path, re-zeros reference).
+      if (calPressed) {
+        startScan();
+        Serial.println("Calibration scan triggered");
       }
       updateDisplay();
       break;
@@ -162,6 +216,10 @@ void handleStateMachine(bool startPressed, bool modePressed) {
 
     case STATE_DISPLAYING:
       updateDisplay();
+      // MODE toggles layout here too.
+      if (modePressed) {
+        displayMode = (displayMode == MODE_CURVE) ? MODE_NUMERIC : MODE_CURVE;
+      }
       // START returns to IDLE (press again to run a fresh scan).
       if (startPressed) {
         currentState = STATE_IDLE;
@@ -310,18 +368,140 @@ void processLine(char* line) {
 }
 
 // ======================================================================
-// DISPLAY (placeholder until a display is selected)
+// DISPLAY
 // ======================================================================
 
-void updateDisplay() {
-  // TODO: render the SWR curve from scanPoints[] onto the chosen display.
+void displayWelcome() {
+  tft.fillScreen(ILI9341_BLACK);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setTextSize(2);
+  tft.setCursor(20, 40);
+  tft.print("SWR METER");
+  tft.setCursor(20, 70);
+  tft.setTextSize(1);
+  tft.print("Uno R4 + AA-30.ZERO");
+  tft.setCursor(20, 90);
+  tft.print("Bands: [BAND], Scan: [START]");
+  tft.setCursor(20, 104);
+  tft.print("Mode: [MODE], Cal: [CAL]");
+
+  Serial.println("==========================================================");
+  Serial.println("SWR METER BOOTED: Uno R4 Minima + AA-30 Zero + ILI9341");
+  Serial.println("[BAND] band  [START] scan  [MODE] layout  [CAL] calibrate");
+  Serial.println("==========================================================");
 }
 
-void displayWelcome() {
-  Serial.println("==========================================================");
-  Serial.println("SWR METER BOOTED: Uno R4 Minima + AA-30 Zero");
-  Serial.print("[MODE] select band, [START] scan. PC console @ ");
-  Serial.print(PC_BAUD);
-  Serial.println(" baud.");
-  Serial.println("==========================================================");
+// Draws the page chrome + either a curve or numeric readout from scanPoints[].
+void updateDisplay() {
+  const Band& b = BANDS[bandIndex];
+
+  // Header line: band + state.
+  tft.fillRect(0, 0, 320, 24, ILI9341_BLUE);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLUE);
+  tft.setTextSize(1);
+  tft.setCursor(4, 6);
+  tft.print(b.name);
+  tft.setCursor(80, 6);
+  switch (currentState) {
+    case STATE_IDLE:       tft.print("IDLE"); break;
+    case STATE_SCANNING:   tft.print("SCANNING..."); break;
+    case STATE_DISPLAYING: tft.print("PRESS START"); break;
+  }
+
+  if (scanCount == 0) {
+    // No data yet -> idle prompt.
+    tft.fillRect(0, 26, 320, 240 - 26, ILI9341_BLACK);
+    tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+    tft.setCursor(30, 120);
+    tft.setTextSize(2);
+    tft.print("Press [START]");
+    tft.setCursor(50, 150);
+    tft.print("to scan");
+    return;
+  }
+
+  if (displayMode == MODE_CURVE) {
+    drawCurve(b);
+  } else {
+    drawNumeric();
+  }
+}
+
+// Scales scanPoints[] into the plot area and draws the SWR curve.
+void drawCurve(const Band& b) {
+  const int x0 = 8, x1 = 312, y0 = 36, y1 = 224;
+  const int plotW = x1 - x0;
+  const int plotH = y1 - y0;
+
+  tft.fillRect(x0 - 2, y0 - 8, plotW + 4, plotH + 16, ILI9341_BLACK);
+  tft.drawRect(x0, y0, plotW, plotH, ILI9341_WHITE);
+
+  // Y scaling: fixed 1.0 to 3.0 SWR window for readable comparison.
+  const float swrMin = 1.0f, swrMax = 3.0f;
+
+  // Draw SWR=2.0 reference gridline.
+  int y2 = y1 - (int)((2.0f - swrMin) / (swrMax - swrMin) * plotH);
+  tft.drawLine(x0, y2, x1, y2, ILI9341_DARKGREY);
+  tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
+  tft.setCursor(x1 - 24, y2 - 10);
+  tft.print("SWR2");
+
+  uint16_t color = ILI9341_GREEN;
+  for (uint16_t i = 1; i < scanCount; i++) {
+    const Measurement& a = scanPoints[i - 1];
+    const Measurement& c = scanPoints[i];
+
+    int ax = x0 + (int)((double)(a.freqMHz - b.low / 1e6) / (double)((b.high - b.low) / 1e6) * plotW);
+    int cx = x0 + (int)((double)(c.freqMHz - b.low / 1e6) / (double)((b.high - b.low) / 1e6) * plotW);
+    int ay = y1 - (int)((a.swr - swrMin) / (swrMax - swrMin) * plotH);
+    int cy = y1 - (int)((c.swr - swrMin) / (swrMax - swrMin) * plotH);
+
+    // Clamp into the plot box so out-of-range SWR cannot draw outside.
+    ay = (ay < y0) ? y0 : (ay > y1 ? y1 : ay);
+    cy = (cy < y0) ? y0 : (cy > y1 ? y1 : cy);
+
+    // Select color by SWR threshold (green < 1.5, yellow < 2.0, red >= 2.0).
+    color = (c.swr >= 2.0f) ? ILI9341_RED : (c.swr >= 1.5f ? ILI9341_YELLOW : ILI9341_GREEN);
+    tft.drawLine(ax, ay, cx, cy, color);
+  }
+
+  // Footer inside plot: min SWR + frequency.
+  float swrMinV = 1e9f; float fMin = 0.0f;
+  for (uint16_t i = 0; i < scanCount; i++) {
+    if (scanPoints[i].swr < swrMinV) { swrMinV = scanPoints[i].swr; fMin = scanPoints[i].freqMHz; }
+  }
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(12, y1 + 6);
+  tft.print("MinSWR ");
+  tft.print(swrMinV, 2);
+  tft.print(" @ ");
+  tft.print(fMin, 3);
+  tft.print(" MHz");
+  tft.setCursor(140, y1 + 6);
+  tft.print("n=");
+  tft.print(scanCount);
+}
+
+// Big single-value numeric readout (last valid measurement).
+void drawNumeric() {
+  const Measurement& m = scanPoints[scanCount - 1];
+
+  tft.fillRect(0, 26, 320, 240 - 26, ILI9341_BLACK);
+
+  tft.setTextSize(3);
+  tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
+  tft.setCursor(10, 40);  tft.print("F ");
+  tft.print(m.freqMHz, 3); tft.println(" MHz");
+
+  tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
+  tft.setCursor(10, 90);  tft.print("R  ");
+  tft.print(m.r, 1);      tft.println(" ohm");
+
+  tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
+  tft.setCursor(10, 140); tft.print("X  ");
+  tft.print(m.x, 1);      tft.println(" ohm");
+
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(10, 190); tft.print("SWR ");
+  tft.print(m.swr, 2);
 }
