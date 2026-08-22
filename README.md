@@ -100,10 +100,11 @@ See [`docs/AA-30_ZERO_data_exchange_protocol.md`](docs/AA-30_ZERO_data_exchange_
 
 ## 💾 Software
 
-- **`AA30_Bridge.ino`** — serial bridge + state machine. Parses and validates the `freq,R,X`
-  stream, computes SWR, stores valid points in `scanPoints[]`, then renders them to the
-  ILI9341 display (SWR curve or numeric readout) and reads the four buttons.
-  Requires **Adafruit_GFX** and **Adafruit_ILI9341**.
+- **`src/AA30_Bridge.ino`** — serial bridge + state machine. Parses and validates the
+  `freq,R,X` stream, computes SWR, stores valid points in `scanPoints[]`, then renders them
+  to the ILI9341 display (SWR curve or numeric readout) and reads the four buttons.
+  Built with **PlatformIO** + Arduino framework (requires **Adafruit_GFX** and
+  **Adafruit_ILI9341**, declared automatically in `platformio.ini`).
 - **`python/`** — `sweep_bands.py` (drive the analyzer + record results) and
   `graph_results.py` (render PDF graphs with matplotlib).
 
@@ -146,10 +147,16 @@ See the assembly photo above. Demo video: [AA-30.ZERO demo](media/aa30_zero_demo
 
 ## 🔨 Build / Upload
 
+The firmware is built with **PlatformIO** (Arduino framework, board `uno_r4_minima`):
+
 ```sh
-arduino-cli compile --fqbn arduino:renesas_uno:minima AA30_Bridge
-arduino-cli upload --fqbn arduino:renesas_uno:minima --port COMxx AA30_Bridge
+pio run                  # compile
+pio run -t upload        # flash over USB/DFU
+pio run -t monitor       # serial monitor @ 115200
 ```
+
+Config: [`platformio.ini`](platformio.ini); source: `src/AA30_Bridge.ino`. The Adafruit
+GFX + ILI9341 libraries are pulled automatically via `lib_deps`.
 
 USB CDC console: 115200 baud. AA-30 UART: 38400 baud (`Serial1`).
 

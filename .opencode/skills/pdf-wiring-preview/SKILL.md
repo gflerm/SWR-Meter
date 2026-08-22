@@ -61,7 +61,7 @@ Power (NOT level-shifted — wired directly):
 | MODE   | D4     | Toggle display layout (curve / numeric) |
 | CAL    | D5     | Run a one-off calibration scan |
 
-All are INPUT_PULLUP (pressed = LOW), debounced ~25 ms in `AA30_Bridge.ino`.
+All are INPUT_PULLUP (pressed = LOW), debounced ~25 ms in `src/AA30_Bridge.ino`.
 
 ## Key constraints to preserve
 
@@ -70,9 +70,10 @@ All are INPUT_PULLUP (pressed = LOW), debounced ~25 ms in `AA30_Bridge.ino`.
 - Only DIN/CLK/CS/DC/RST are level-shifted (LEVEL-8P is a MOSFET pass-gate; each channel
   has a 10K pull-up to LV and HV). VCC(3.3 V), GND and BL(3.3 V) are wired directly.
 - Keep the LV-side (3.3 V) wires short (<5 cm) to avoid TXS0108E overshoot.
-- Firmware (`AA30_Bridge.ino`) drives the ILI9341 via Adafruit_GFX + Adafruit_ILI9341:
-  CS=D10, DC=D9, RST=D8, with SPI MOSI=D11, SCK=D13. Buttons START/BAND/MODE/CAL are read
-  on D2/D3/D4/D5 and debounced. Only DIN/CLK/CS/DC/RST are level-shifted.
+- Firmware (`src/AA30_Bridge.ino`, PlatformIO + Arduino) drives the ILI9341 via
+  Adafruit_GFX + Adafruit_ILI9341: CS=D10, DC=D9, RST=D8, with SPI MOSI=D11, SCK=D13.
+  Buttons START/BAND/MODE/CAL are read on D2/D3/D4/D5 and debounced. Only DIN/CLK/CS/DC/RST
+  are level-shifted.
 - HU1-HU8's `TX/RX/GND` silkscreen labels are NOT used for this SPI hook-up; the board is
   a pass-through breakout. If the user supplies the real HU1-HU8 pin mapping, update both
   the diagram and this table.

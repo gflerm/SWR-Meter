@@ -57,7 +57,7 @@ frx0         -> <one line: 14.100000,R,X> then OK
   `center − sw/2 … center + sw/2`.
 - Practical **max ~700 points** (n≈700 → 701 lines). `frx800` stalls on this unit.
 - `R`/`X` are series resistance/reactance in ohms. With a 50 Ω system, SWR is
-  computed from R and X (see project `AA30_Bridge.ino`).
+  computed from R and X (see project `src/AA30_Bridge.ino`).
 - It is a **5 V** device; no level shifter required with a 5 V Arduino.
 
 ## Wiring on the Uno R4 Minima

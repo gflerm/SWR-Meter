@@ -89,21 +89,23 @@ CAL    ->  D5    (run a one-off calibration scan)
 ```
 
 ### Operational Command Flow
-The state machine in `AA30_Bridge.ino` enforces this critical sequence:
+The state machine in `src/AA30_Bridge.ino` enforces this critical sequence:
 1. **IDLE** $\rightarrow$ (Band Select $\rightarrow$ Frequency Set $\rightarrow$ Sweep Range Set) $\rightarrow$ **SCANNING** $\rightarrow$ **DISPLAYING** $\rightarrow$ **Idle**
 2. **CAL** routes through the same `fq`/`sw`/`frx` path to re-zero the reference.
 
 ## 💾 Software Implementation
-*   **Bridge Functionality:** `AA30_Bridge.ino` manages the two serial lines (PC `Serial` + analyzer `Serial1`), relays data, and handles the four button inputs (START D2, BAND D3, MODE D4, CAL D5).
+Built with **PlatformIO** + Arduino framework, board `uno_r4_minima` (config: [`platformio.ini`](platformio.ini)).
+*   **Bridge Functionality:** `src/AA30_Bridge.ino` manages the two serial lines (PC `Serial` + analyzer `Serial1`), relays data, and handles the four button inputs (START D2, BAND D3, MODE D4, CAL D5).
 *   **Measurement Logic:** The system state machine orchestrates the command sequence and handles data parsing and SWR calculation based on the protocol.
 *   **Bogus-Reading Guard:** Incoming `freq,R,X` lines are validated before use — NaN/Inf, physically impossible magnitudes (`R`/`|X|` > 1 MΩ), and out-of-range SWR (`<1` or `>100`) are discarded. Valid points are stored in `scanPoints[]` with computed SWR.
-*   **Display/UI:** `scanPoints[]` are rendered to the ILI9341 as either an SWR-vs-frequency curve (green/yellow/red by SWR threshold) or a large R/X/SWR numeric readout. Requires Adafruit_GFX + Adafruit_ILI9341.
+*   **Display/UI:** `scanPoints[]` are rendered to the ILI9341 as either an SWR-vs-frequency curve (green/yellow/red by SWR threshold) or a large R/X/SWR numeric readout. Requires Adafruit_GFX + Adafruit_ILI9341 (declared via `lib_deps`).
 
 ## ⚠️ Current Status
 ✅ **Uno R4 ⇄ AA-30.ZERO communication verified working** (using hardware `Serial1` @ 38400, analyzer on UART1). A 50 Ω dummy load reads correctly (R ≈ 50 Ω, X ≈ 0, SWR ≈ 1.0 across HF bands). Bogus-reading guard in place.
 ✅ **Full 160 m → 10 m sweep recorded** (IARU **Region 1**, 100 points/band) in [`result.md`](result.md) and [`result_data.json`](result_data.json); per-band and combined SWR graphs rendered to PDF in [`graphs/`](graphs).
 🖥️ **Display selected**: Waveshare 2.4" SPI LCD (ILI9341, 240x320, 65K colour), 3.3 V logic.
-🎛️ **Controls + UI implemented**: four buttons (START D2 / BAND D3 / MODE D4 / CAL D5) drive an ILI9341 SWR curve + numeric readout in `AA30_Bridge.ino`.
+🎛️ **Controls + UI implemented**: four buttons (START D2 / BAND D3 / MODE D4 / CAL D5) drive an ILI9341 SWR curve + numeric readout in `src/AA30_Bridge.ino`.
+✅ **Builds cleanly with PlatformIO** (`renesas-ra` platform, `uno_r4_minima` board) — RAM 29.6%, Flash 24.4%.
 
 ## 🚀 Next Steps
 1.  **Verify on hardware:** Confirm ILI9341 rendering + four-button workflow against a real display.
