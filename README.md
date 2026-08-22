@@ -169,5 +169,22 @@ USB CDC console: 115200 baud. AA-30 UART: 38400 baud (`Serial1`).
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+This project is released under the **MIT License** — see [`LICENSE`](LICENSE).
+
+### Third-party licenses
+
+The firmware and tooling depend on the following open-source components, pulled at
+build time by PlatformIO. They are **not** vendored into this repository, but are
+required to build/run the project:
+
+| Component | License | Used for |
+|-----------|---------|----------|
+| Adafruit GFX Library | BSD | Display graphics primitives (ILI9341) |
+| Adafruit ILI9341 | BSD | Waveshare 2.4" SPI display driver |
+| Adafruit BusIO | BSD | Shared I²C/SPI bus helpers |
+| Arduino core (renesas-ra framework) | MIT | Uno R4 Minima Arduino API |
+| Renesas RA board platform, toolchains | Apache-2.0 / various | PlatformIO build tooling |
+
+These retain their own copyright/license terms. MIT is compatible with each of them;
+no changes to this project's license are required.
 
