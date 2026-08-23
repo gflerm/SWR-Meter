@@ -602,14 +602,14 @@ void startScan() {
   Serial.println(" Hz");
 
   // Power the RF board first; without ON the AA-30 returns no measurement data.
-  // The analyzer needs a short gap between commands (esp. before frx) or it
+  // The analyzer needs a generous gap between commands (esp. before frx) or it
   // drops the sweep request when the setup commands arrive back-to-back.
   AA_PORT.println("ON");
-  delay(150);
+  delay(400);
   AA_PORT.print("fq"); AA_PORT.println(center);
-  delay(50);
+  delay(300);
   AA_PORT.print("sw"); AA_PORT.println(span);
-  delay(50);
+  delay(300);
   AA_PORT.print("frx"); AA_PORT.println(POINTS_PER_SCAN - 1);
 }
 
@@ -683,10 +683,13 @@ void calBeginBandSweep() {
   Serial.println(calPhasePrompt());
 
   // Power the RF board first; without ON the AA-30 returns no measurement data.
+  // Generous gaps prevent the analyzer dropping the sweep request.
   AA_PORT.println("ON");
-  delay(50);
+  delay(400);
   AA_PORT.print("fq"); AA_PORT.println(center);
+  delay(300);
   AA_PORT.print("sw"); AA_PORT.println(span);
+  delay(300);
   AA_PORT.print("frx"); AA_PORT.println(CAL_PTS_PER_BAND - 1);
 }
 
