@@ -417,6 +417,11 @@ G5  Calibration: connect a 50 ohm load, run the wizard, confirm it sweeps all
     bands and reports PASS (single-phase; the table is saved to EEPROM).
 G6  Reset: press the physical RESET button on the R4; confirm the welcome
     screen returns and the USB port re-enumerates (reopen the simulator).
+G8  Buttons + LCD: press each physical button (START/BAND/MODE/CAL) and confirm
+    the ILI9341 updates to the matching page (scan, next band, curve/numeric,
+    calibration) each time.
+G7  (optional eye-check) In external control the LCD shows a one-shot
+    'EXTERNAL CONTROL' splash and then stops updating.
 """
 
 

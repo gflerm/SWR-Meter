@@ -45,6 +45,7 @@ are called out explicitly rather than faked by automation.
 | G5 | [calibration wizard] | [single-phase 50-ohm run; reports DONE/FAILED & saves table] | ⚠️ partial | attach 50 Ω load |
 | G6 | [reset → welcome] | [physical reset restores welcome; port re-enumerates] | | ✅ |
 | G7 | [external control] | [`!CTRL:EXTERNAL` reports `@CTRL:external` & bypasses the display; unit stays responsive; `!CTRL:LOCAL` resumes] | ✅ | 👁 LCD splash |
+| G8 | [physical buttons + LCD] | [each of the 4 physical buttons drives the matching action; the ILI9341 shows the correct page immediately] | | ✅ buttons + 👁 LCD |
 
 ## 4. Architecture
 
@@ -96,6 +97,8 @@ are called out explicitly rather than faked by automation.
 - [G6] press the physical RESET; confirm welcome returns + port re-enumerates.
 - [G5] attach a 50 Ω load, run the wizard, confirm PASS and that the table is saved to EEPROM.
 - [G1/👁] confirm the physical LCD shows the welcome page (host can't see it).
+- [G8/👁] press each physical button (START/BAND/MODE/CAL) and confirm the ILI9341
+  updates to the matching page each time.
 
 ## 7. Results & verification record
 
@@ -110,6 +113,7 @@ are called out explicitly rather than faked by automation.
 | G5 | | | partial — needs a 50 Ω load |
 | G6 | | | manual |
 | G7 | 2026-08-23 | ✅ 2026-08-23 | |
+| G8 | | | manual — buttons + LCD |
 
 ## 8. Rollback & versioning
 

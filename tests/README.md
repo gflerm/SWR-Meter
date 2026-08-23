@@ -26,6 +26,7 @@ board on the port.
 | G5 | Calibration wizard (50 ohm phase, single-phase) | ⚠️ | connect a 50 Ω load |
 | G6 | Reset returns to welcome | | ✅ physical button |
 | G7 | External control mode (`!CTRL:EXTERNAL/LOCAL`) | ✅ | |
+| G8 | Physical buttons + LCD rendering | | ✅ buttons + 👁 LCD |
 
 ## How it stays deterministic
 
@@ -53,3 +54,5 @@ Each run appends to `tests/test_log.md`.
 - G1 — confirm the physical ILI9341 shows the welcome page.
 - G7 — (**optional eye-check**) while `!CTRL:EXTERNAL` is active, the physical
   LCD shows the one-shot "EXTERNAL CONTROL" splash and then does not update.
+- G8 — press each physical button (START/BAND/MODE/CAL) and confirm the ILI9341
+  updates to the matching page each time.
