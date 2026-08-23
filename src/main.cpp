@@ -308,10 +308,13 @@ void loop() {
   // PC soft-button commands + passthrough (lines starting with '!').
   handlePcCommands(startPressed, bandPressed, modePressed, calPressed);
 
-  // Try to abort a stuck scan/calibration sweep (silent analyzer) on a
-  // timeout or any button press, so the unit stays responsive.
-  if (isSweepStuck(now) || startPressed || bandPressed || modePressed || calPressed) {
-    if (currentState == STATE_SCANNING || (currentState == STATE_CALIBRATE && calMeasuring)) {
+  // Abort a genuinely hung sweep (silent analyzer) so the unit stays
+  // responsive. Buttons never abort a sweep: the START press that begins a
+  // sweep would otherwise immediately abort it, and a live sweep updates
+  // sweepStart on every point so it never appears stuck while progressing.
+  if (isSweepStuck(now)) {
+    if (currentState == STATE_SCANNING ||
+        (currentState == STATE_CALIBRATE && calMeasuring)) {
       collecting   = false;
       calMeasuring = false;
       currentState = STATE_IDLE;
@@ -719,6 +722,7 @@ void calHandlePoint(const Measurement& m) {
     cb.count = calPoint + 1;
     calPoint++;
   }
+  sweepStart = millis();   // progress received -> a sweep in motion is not stuck
   emitCalProgress();
 }
 
@@ -731,6 +735,7 @@ void calHandlePoint(const Measurement& m) {
  */
 void calFinishBand() {
   CalBand& cb = calTable[calBandIndex];
+  bool ok = false;
 
   if (calPhase == CAL_PHASE_50) {
     cb.valid = (cb.count == CAL_PTS_PER_BAND);
@@ -741,16 +746,12 @@ void calFinishBand() {
         rErr += fabsf(cb.pts[i].rCorr);
       }
       rErr /= cb.count;
-      bool ok = (rErr / 50.0f * 100.0f <= 10.0f);
-      if (ok) calTotalPass++;
-      else    calFailCount++;
+      ok = (rErr / 50.0f * 100.0f <= 10.0f);
     } else {
       cb.valid = false;   // incomplete band
-      calFailCount++;
     }
   } else {
     // SHORT: |R|,|X| both small.  OPEN: |R| or |X| large.
-    bool ok = false;
     if (calPhase == CAL_PHASE_SHORT) {
       ok = true;
       for (uint8_t i = 0; i < cb.count; i++) {
@@ -767,9 +768,21 @@ void calFinishBand() {
         }
       }
     }
-    if (ok) calTotalPass++;
-    else    calFailCount++;
   }
+
+  if (ok) calTotalPass++;
+  else    calFailCount++;
+
+  // Live per-band pass/fail telemetry for the guided walkthrough.
+  Serial.print("@CALBAND:band=");
+  Serial.print((int)calBandIndex + 1);
+  Serial.print(",pass=");
+  Serial.println(ok ? "1" : "0");
+  Serial.print(calPhasePrompt());
+  Serial.print(" band ");
+  Serial.print(BANDS[calBandIndex].name);
+  Serial.print(": ");
+  Serial.println(ok ? "PASS" : "FAIL");
 
   calBandIndex++;
   if (calBandIndex < NUM_BANDS) {

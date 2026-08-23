@@ -67,11 +67,16 @@ class Firmware:
         self.write("!GET:STATE")
         return "\n".join(self.read_lines(1.0))
 
-    def wait_for(self, pattern, timeout=120.0):
-        """Return (matched_line, collected_lines) once a line matches."""
+    def wait_for(self, pattern, timeout=120.0, verbose=True):
+        """Return (matched_line, collected_lines) once a line matches.
+
+        If verbose, streams live progress to stdout: band changes and each
+        band's PASS/FAIL (from @CALPROG / @CALBAND telemetry).
+        """
         rx = re.compile(pattern)
         end = time.time() + timeout
         got = []
+        last_band = 0
         self.buf = b""
         while time.time() < end:
             idx = self.buf.find(b"\n")
@@ -79,8 +84,20 @@ class Firmware:
                 line = self.buf[:idx].decode("utf-8", "replace").strip()
                 self.buf = self.buf[idx + 1:]
                 got.append(line)
-                m = rx.search(line)
-                if m:
+                if verbose:
+                    m = re.search(r"@CALPROG:band=(\d+)/\d+,pt=(\d+)/\d+", line)
+                    if m:
+                        bnum = int(m.group(1))
+                        if bnum != last_band:
+                            print("    Band %d/10 ..." % bnum)
+                            last_band = bnum
+                        continue
+                    vb = re.search(r"@CALBAND:band=(\d+),pass=(\d)", line)
+                    if vb:
+                        print("    Band %s: %s" % (vb.group(1),
+                                                   "PASS" if vb.group(2) == "1" else "FAIL"))
+                        continue
+                if rx.search(line):
                     return m, got
                 continue
             if self.ser.in_waiting:
