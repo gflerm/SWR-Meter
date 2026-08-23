@@ -552,18 +552,17 @@ class SimulatorApp:
 
         self.port_var = tk.StringVar(value=self.port or "")
         ttk.Label(top, text="Port:").grid(row=0, column=0, sticky="w")
-        self.port_entry = ttk.Entry(top, textvariable=self.port_var, width=12)
+        self.port_entry = ttk.Combobox(top, textvariable=self.port_var, width=10)
         self.port_entry.grid(row=0, column=1, padx=4)
         ttk.Label(top, text="Baud:").grid(row=0, column=2, sticky="w")
         self.baud_var = tk.StringVar(value=str(self.baud))
         ttk.Entry(top, textvariable=self.baud_var, width=8).grid(row=0, column=3, padx=4)
         self.connect_btn = ttk.Button(top, text="Connect", command=self._toggle_conn)
         self.connect_btn.grid(row=0, column=4, padx=8)
-
-        # Reset the MCU (1200 baud touch) on connect so the welcome screen shows.
-        self.reset_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(top, text="Reset on connect", variable=self.reset_var).grid(
-            row=0, column=5, padx=8)
+        self.reset_btn = ttk.Button(top, text="Reset", command=self._do_reset)
+        self.reset_btn.grid(row=0, column=5, padx=4)
+        ttk.Button(top, text="Refresh", command=self._refresh_ports).grid(
+            row=0, column=6, padx=4)
 
         # Display canvas (scaled)
         self.display_img = None
@@ -623,31 +622,54 @@ class SimulatorApp:
         self._log("-- log paused --" if self.paused else "-- log resumed --")
 
     def connect(self):
-        if self.reset_var.get():
-            self._reset_target()
-        try:
-            self.ser = serial.Serial(self.port_var.get(),
-                                     int(self.baud_var.get()), timeout=0.1)
-            self.connect_btn.configure(text="Disconnect")
-            self._log(f"Connected to {self.port_var.get()} @ {self.baud_var.get()}")
-            self.send("!GET:STATE")
-        except Exception as exc:
-            self._log(f"Connect failed: {exc}")
-            self.ser = None
+        # No reset touch here: just open the CDC port at the baud rate.
+        # (Reset is a separate, opt-in action via the [Reset] button.)
+        port = self.port_var.get()
+        baud = int(self.baud_var.get())
+        for attempt in range(1, 11):
+            try:
+                self.ser = serial.Serial(port, baud, timeout=0.05,
+                                         write_timeout=0.1)
+                self.connect_btn.configure(text="Disconnect")
+                self._log(f"Connected to {port} @ {baud}")
+                self.send("!GET:STATE")
+                return
+            except Exception as exc:
+                if attempt == 1:
+                    self._log(f"Waiting for {port}... ({exc})")
+                time.sleep(0.4)
+        self._log(f"Connect failed: could not open {port}")
+        self.ser = None
+        self._refresh_ports()
 
-    def _reset_target(self):
-        """War-reset the Uno R4 by reopening at 1200 baud (Arduino 1200bps
-        touch convention), so the firmware reboots and shows the welcome
-        screen."""
+    def reset_target(self):
+        """Opt-in warm reset of the Uno R4 (1200 baud touch). The CDC port
+        disappears and re-enumerates; this waits and refreshes the port list."""
         port = self.port_var.get()
         try:
-            self._log(f"Resetting {port} (1200 baud touch)...")
-            temp = serial.Serial(port, 1200, timeout=0.1)
+            self._log(f"Touching {port} at 1200 baud to reset the R4...")
+            temp = serial.Serial(port, 1200, timeout=0.5)
             temp.dtr = False
+            time.sleep(0.1)
             temp.close()
-            time.sleep(0.5)  # let the bootloader run
         except Exception as exc:
             self._log(f"Reset touch failed: {exc}")
+            return
+        self._log("Waiting for the board to re-enumerate (2 s)...")
+        time.sleep(2.0)
+        self._refresh_ports()
+
+    def _refresh_ports(self):
+        """Refresh the Port dropdown from the OS COM list."""
+        try:
+            from serial.tools import list_ports
+            ports = [p.device for p in list_ports.comports()]
+        except Exception:
+            ports = []
+        self.port_entry.configure(values=ports)
+        if ports and self.port_var.get() not in ports:
+            self.port_var.set(ports[-1])
+        self._log("Ports: " + (", ".join(ports) if ports else "(none)"))
 
     def disconnect(self):
         if self.ser:
@@ -679,6 +701,12 @@ class SimulatorApp:
             self._log(f">> {cmd}")
         except Exception as exc:
             self._log(f"Send failed: {exc}")
+
+    def _do_reset(self):
+        if self.ser:
+            self.disconnect()
+        self.reset_target()
+        self.connect()
 
     def _read_serial(self):
         if not self.ser:
