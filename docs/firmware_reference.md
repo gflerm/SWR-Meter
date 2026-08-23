@@ -294,7 +294,7 @@ Also echoes human-readable lines: `Scanning <band> ...`, `<AA-30 OK>`,
 | `!BTN:CAL` | Press/emulate the CAL button. |
 | `!CTRL:EXTERNAL` | Host takes control; bypass display rendering. |
 | `!CTRL:LOCAL` | Return to local control; resume rendering. |
-| `!GET:STATE` | Request `@STATE:`/`@BAND:`/`@MODE:`. |
+| `!GET:STATE` | Request `@STATE:`/`@BAND:`/`@MODE:`/`@CTRL:`. |
 
 Any other line is forwarded verbatim to the AA-30 while in IDLE
 (e.g. `ver`, `fq`, `sw`, `frx`, `ON`, `OFF`).

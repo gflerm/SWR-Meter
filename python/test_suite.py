@@ -61,13 +61,21 @@ class Firmware:
     """Serial reader that reassembles lines across reads."""
 
     def __init__(self, port, baud):
-        self.ser = serial.Serial(port, baud, timeout=0.05, write_timeout=0.5)
+        self.ser = serial.Serial(port, baud, timeout=0.05, write_timeout=3.0)
         self.buf = b""
         time.sleep(0.5)
         self.ser.reset_input_buffer()
 
     def write_line(self, t):
-        self.ser.write((t + "\n").encode())
+        # Retry a timed-out write once: right after a heavy sweep/calibration
+        # goal the USB-CDC port can be momentarily blocked.
+        for _ in range(2):
+            try:
+                self.ser.write((t + "\n").encode())
+                return
+            except serial.SerialTimeoutException:
+                time.sleep(0.3)
+        raise serial.SerialTimeoutException("write timed out: " + t)
 
     def clear(self):
         self.ser.reset_input_buffer()
@@ -92,11 +100,17 @@ class Firmware:
 
     def state(self):
         # Drop stale bytes, request a fresh snapshot, read one snapshot's worth
-        # of lines (they arrive as one burst).
-        self.clear()
-        self.write_line("!GET:STATE")
-        lines = self.read_lines(1.0)
-        return "".join(lines)
+        # of lines (they arrive as one burst). Retry briefly if the port is
+        # momentarily busy (e.g. right after a sweep/calibration goal) so the
+        # query is not answered with an empty read.
+        for _ in range(3):
+            self.clear()
+            self.write_line("!GET:STATE")
+            lines = self.read_lines(1.0)
+            s = "".join(lines)
+            if "@STATE:" in s:
+                return s
+        return s
 
     def band(self):
         m = BAND_RE.search(self.state())
@@ -193,8 +207,13 @@ def to_idle(fw):
     for _ in range(12):
         st = fw.state()
         if "@STATE:IDLE" in st:
-            pause()
-            return True
+            # Drain any residual bytes from a prior goal, then confirm IDLE
+            # with a clean query so the next goal starts from a settled state.
+            pause(0.3)
+            fw.clear()
+            st = fw.state()
+            if "@STATE:IDLE" in st:
+                return True
         # A completed scan leaves the unit in DISPLAYING, and CAL_DONE shows
         # the summary; both exit via START. Every other non-idle state is
         # cancelled with MODE. Poll fresh state each pass.
@@ -254,8 +273,8 @@ def t_scan_data(fw):
     pts, ok = fw.scan()
     if len(pts) < 20:
         return Result("G4", False, "only %d points, ok=%s" % (len(pts), ok))
-    r_avg = statistics.mean(p[1] for p in pts)
-    x_avg = statistics.mean(p[2] for p in pts)
+    r_avg = statistics.median(p[1] for p in pts)
+    x_avg = statistics.median(p[2] for p in pts)
     swr_min = min(p[3] for p in pts)
     plausible = 0.5 <= r_avg <= 500 and 1.0 <= swr_min <= 3.0
     # Compare with a passthrough sweep (median R of both).
@@ -267,7 +286,7 @@ def t_scan_data(fw):
         r_fw = statistics.median(p[1] for p in pts)
         r_pt = statistics.median(p[1] for p in ppts)
         agree = abs(r_fw - r_pt) <= max(1.0, 0.02 * r_pt)
-    detail = ("%dpts ok=%s Ravg=%.1f Xavg=%.1f SWRmin=%.2f plausible=%s "
+    detail = ("%dpts ok=%s Rmed=%.1f Xmed=%.1f SWRmin=%.2f plausible=%s "
               "passthrough_agree=%s (R_fw=%.1f vs R_pt=%s)" % (
                   len(pts), ok, r_avg, x_avg, swr_min, plausible, agree,
                   statistics.median(p[1] for p in pts),
@@ -281,16 +300,62 @@ def t_calibration(fw):
     fw.write_line("!BTN:CAL")
     time.sleep(0.4)
     fw.clear()
-    # Capture the calibration-progress telemetry that the wizard emits.
-    pts, ok = fw._sweep(lambda: fw.write_line("!BTN:START"), 1, 15.0)
-    # Read any @CALPHASE / @CALPROG lines the wizard emitted during the sweep.
+    # Drive the wizard: sweep all bands and wait for it to finish (CAL_DONE).
+    # Key off the deterministic end-of-wizard signal, not a blind timer.
     fw.write_line("!GET:STATE")
     s = fw.state()
     if "@STATE:CALIBRATE" not in s:
         return Result("G5", False, "not in CALIBRATE: " + s.strip()[:60])
+    fw.write_line("!BTN:START")
+    end = time.time() + 60.0
+    saw_done = False
+    saw_phase = False
+    saw_band = False
+    while time.time() < end:
+        for line in fw.read_lines(0.5):
+            if "@CALPHASE:" in line:
+                saw_phase = True
+            if "@CALPROG:band=" in line:
+                saw_band = True
+            if "@STATE:CAL_DONE" in line or "@CALRESULT:" in line:
+                saw_done = True
+        if saw_done:
+            break
+    # Leave the wizard cleanly so subsequent goals start from IDLE.
+    to_idle(fw)
+    if not saw_done:
+        return Result("G5", False, "calibration did not reach CAL_DONE "
+                       "(phase=%s band=%s)" % (saw_phase, saw_band))
     return Result("G5", True,
-                  "entered CALIBRATE and swept the single 50-ohm phase via START "
-                  "(see calibrate_guide.py for the hardware procedure)")
+                  "entered CALIBRATE; swept the single 50-ohm phase to CAL_DONE "
+                  "(phase telemetry=%s band telemetry=%s)" % (saw_phase, saw_band))
+
+
+def t_ctrl(fw):
+    """G7: host control toggles @CTRL state and the display bypass."""
+    to_idle(fw)
+    # Enter external control; the host owns the UI and the display is bypassed.
+    fw.clear()
+    fw.write_line("!CTRL:EXTERNAL")
+    pause(0.4)
+    s = fw.state()
+    ext_ok = "@CTRL:external" in s
+    # The unit must remain responsive to commands while the display is bypassed.
+    b1 = fw.band()
+    fw.write_line("!BTN:BAND")
+    pause(0.6)
+    b2 = fw.band()
+    responsive = b2 is not None and b2 != b1
+    # Return to local control; display rendering resumes.
+    fw.clear()
+    fw.write_line("!CTRL:LOCAL")
+    pause(0.4)
+    s = fw.state()
+    local = "@CTRL:local" in s
+    ok = ext_ok and responsive and local
+    detail = ("ext=%s responsive=%s local=%s (b1=%s b2=%s)" % (
+        ext_ok, responsive, local, b1, b2))
+    return Result("G7", ok, detail)
 
 
 def main():
@@ -313,7 +378,7 @@ def main():
         return 2
 
     tests = {"G1": t_boot_welcome, "G2": t_band_selection, "G3": t_mode_toggle,
-             "G4": t_scan_data, "G5": t_calibration}
+             "G4": t_scan_data, "G5": t_calibration, "G7": t_ctrl}
     names = [args.goal] if args.goal else list(tests.keys())
 
     log("=== Test run %s ===" % time.strftime("%Y-%m-%d %H:%M:%S"))

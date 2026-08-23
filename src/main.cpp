@@ -98,6 +98,7 @@ void handlePcCommands(bool& s, bool& b, bool& m, bool& c) {
           emitState(stateString());
           emitBand();
           emitMode();
+          emitCtrl();
         }
       } else if (currentState == STATE_IDLE) {
         // Pass non-command line through to the analyzer.

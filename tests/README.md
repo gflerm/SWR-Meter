@@ -25,6 +25,7 @@ board on the port.
 | G4 | Scan produces data (fw scan agrees with passthrough) | ✅ | |
 | G5 | Calibration wizard (50 ohm phase, single-phase) | ⚠️ | connect a 50 Ω load |
 | G6 | Reset returns to welcome | | ✅ physical button |
+| G7 | External control mode (`!CTRL:EXTERNAL/LOCAL`) | ✅ | |
 
 ## How it stays deterministic
 
@@ -50,3 +51,5 @@ Each run appends to `tests/test_log.md`.
 - G5 — attach a 50 Ω load at the wizard prompt and confirm it sweeps all bands
   and reports PASS (the table is saved to EEPROM).
 - G1 — confirm the physical ILI9341 shows the welcome page.
+- G7 — (**optional eye-check**) while `!CTRL:EXTERNAL` is active, the physical
+  LCD shows the one-shot "EXTERNAL CONTROL" splash and then does not update.
