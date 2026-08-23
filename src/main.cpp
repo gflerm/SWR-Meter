@@ -741,7 +741,12 @@ void calFinishBand() {
         rErr += fabsf(cb.pts[i].rCorr);
       }
       rErr /= cb.count;
-      if (rErr / 50.0f * 100.0f <= 10.0f) calTotalPass++;
+      bool ok = (rErr / 50.0f * 100.0f <= 10.0f);
+      if (ok) calTotalPass++;
+      else    calFailCount++;
+    } else {
+      cb.valid = false;   // incomplete band
+      calFailCount++;
     }
   } else {
     // SHORT: |R|,|X| both small.  OPEN: |R| or |X| large.
@@ -812,6 +817,8 @@ void calFinishPhase() {
     calPassed = (calFailCount == 0);
     currentState = STATE_CAL_DONE;
     emitState("CAL_DONE");
+    Serial.print("@CALRESULT:");
+    Serial.println(calPassed ? "PASS" : "FAIL");
     Serial.print("CALIBRATION ");
     Serial.println(calPassed ? "PASSED" : "FAILED");
   }
