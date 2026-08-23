@@ -80,8 +80,18 @@ struct Measurement {
   bool  valid;   // passed all checks
 };
 
+// Result of a calibration / performance-check measurement.
+struct CalResult {
+  bool         valid;
+  float        r, x, swr;
+  float        devPct;   // % deviation from the reference (resistive refs)
+  bool         pass;
+  const char*  refName;
+};
+
 enum SystemState {
   STATE_IDLE,
+  STATE_CALIBRATE,
   STATE_SCANNING,
   STATE_DISPLAYING
 };
@@ -113,6 +123,25 @@ const Band BANDS[] = {
 
 #define NUM_BANDS (sizeof(BANDS) / sizeof(BANDS[0]))
 
+// Reference loads for the CALIBRATE performance check.
+typedef struct {
+  const char* name;
+  float       rExp;     // expected series R for resistive references
+  float       tolPct;   // +/- tolerance (% of rExp) for pass/fail
+  bool        isOpen;   // high-impedance reference (open)
+  bool        isShort;  // near-zero reference (short)
+} CalRef;
+
+const CalRef CAL_REFS[] = {
+  { "50 ohm",   50.0f, 10.0f, false, false },
+  { "25 ohm",   25.0f, 10.0f, false, false },
+  { "75 ohm",   75.0f, 10.0f, false, false },
+  { "100 ohm", 100.0f, 10.0f, false, false },
+  { "OPEN",      0.0f,  0.0f,  true, false },
+  { "SHORT",     0.0f,  0.0f, false,  true },
+};
+#define NUM_CAL_REFS (sizeof(CAL_REFS) / sizeof(CAL_REFS[0]))
+
 // ======================================================================
 // GLOBALS
 // ======================================================================
@@ -129,6 +158,12 @@ char      lineBuf[LINE_BUF];
 uint8_t   lineLen = 0;
 bool      collecting = false;  // true while awaiting frx data
 
+// Calibration / performance-check state.
+uint8_t    calRefIndex = 0;
+bool       calActive = false;
+bool       calMeasuring = false;
+CalResult  calResult;
+
 // ======================================================================
 // FORWARD DECLARATIONS
 // (A .ino auto-generates these; a .cpp must declare them before use.)
@@ -142,6 +177,12 @@ void updateDisplay();
 void displayWelcome();
 void drawCurve(const Band& b);
 void drawNumeric();
+void startCalibrate();
+void runCalMeasurement();
+void evaluateCalibration(const Measurement& m, CalResult& res);
+void printCalResult();
+void drawCalPrompt();
+void drawCalResult();
 
 // ======================================================================
 // SETUP / LOOP
@@ -216,10 +257,27 @@ void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, b
       if (startPressed) {
         startScan();
       }
-      // CAL re-runs a calibration scan (same command path, re-zeros reference).
+      // CAL enters the calibration / performance check.
       if (calPressed) {
-        startScan();
-        Serial.println("Calibration scan triggered");
+        startCalibrate();
+      }
+      updateDisplay();
+      break;
+
+    case STATE_CALIBRATE:
+      // BAND cycles the reference load; MODE cancels back to IDLE.
+      if (bandPressed) {
+        calRefIndex = (calRefIndex + 1) % NUM_CAL_REFS;
+        Serial.print("Cal reference: ");
+        Serial.println(CAL_REFS[calRefIndex].name);
+      }
+      if (modePressed) {
+        calActive = false;
+        currentState = STATE_IDLE;
+      }
+      // START takes a single-frequency reference measurement.
+      if (startPressed && !calMeasuring) {
+        runCalMeasurement();
       }
       updateDisplay();
       break;
@@ -235,8 +293,20 @@ void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, b
       if (modePressed) {
         displayMode = (displayMode == MODE_CURVE) ? MODE_NUMERIC : MODE_CURVE;
       }
-      // START returns to IDLE (press again to run a fresh scan).
-      if (startPressed) {
+      // During a calibration result, BAND picks a new reference and
+      // returns to the prompt; otherwise START returns to IDLE.
+      if (calActive) {
+        if (bandPressed) {
+          calRefIndex = (calRefIndex + 1) % NUM_CAL_REFS;
+          currentState = STATE_CALIBRATE;
+          Serial.print("Cal reference: ");
+          Serial.println(CAL_REFS[calRefIndex].name);
+        }
+        if (startPressed) {
+          calActive = false;
+          currentState = STATE_IDLE;
+        }
+      } else if (startPressed) {
         currentState = STATE_IDLE;
       }
       break;
@@ -267,6 +337,87 @@ void startScan() {
   AA_PORT.print("fq"); AA_PORT.println(center);
   AA_PORT.print("sw"); AA_PORT.println(span);
   AA_PORT.print("frx"); AA_PORT.println(POINTS_PER_SCAN - 1);
+}
+
+// ======================================================================
+// CALIBRATION / PERFORMANCE CHECK
+// ======================================================================
+
+// Enters the calibration screen (does not measure yet; waits for [START]).
+void startCalibrate() {
+  calActive    = true;
+  calMeasuring = false;
+  scanCount    = 0;
+  currentState = STATE_CALIBRATE;
+  Serial.println("CALIBRATE: connect a reference load and press START.");
+}
+
+// Takes a single-frequency measurement at the current band centre against
+// the selected reference (fq + sw0 + frx0). Results arrive in pollAnalyzer().
+void runCalMeasurement() {
+  const Band& b = BANDS[bandIndex];
+  uint32_t center = (b.low + b.high) / 2;
+
+  scanCount   = 0;
+  collecting  = true;
+  calMeasuring = true;
+  currentState = STATE_CALIBRATE;   // remains until a valid point arrives
+
+  Serial.print("Cal measure @ ");
+  Serial.print(center);
+  Serial.print(" Hz, ref=");
+  Serial.println(CAL_REFS[calRefIndex].name);
+
+  AA_PORT.print("fq"); AA_PORT.println(center);
+  AA_PORT.println("sw0");
+  AA_PORT.println("frx0");
+}
+
+// Compares a measurement against the selected reference and fills calResult.
+void evaluateCalibration(const Measurement& m, CalResult& res) {
+  const CalRef& ref = CAL_REFS[calRefIndex];
+
+  res.valid   = m.valid;
+  res.r       = m.r;
+  res.x       = m.x;
+  res.swr     = m.swr;
+  res.refName = ref.name;
+  res.pass    = false;
+  res.devPct  = 0.0f;
+
+  if (!m.valid) return;
+
+  if (ref.isOpen) {
+    // Open reference: expect a high impedance (large |R| or large |X|).
+    res.pass = (fabsf(m.r) > 500.0f) || (fabsf(m.x) > 500.0f);
+  } else if (ref.isShort) {
+    // Short reference: expect near-zero impedance.
+    res.pass = (fabsf(m.r) < 10.0f) && (fabsf(m.x) < 10.0f);
+  } else {
+    res.devPct = fabsf(m.r - ref.rExp) / ref.rExp * 100.0f;
+    res.pass   = (res.devPct <= ref.tolPct);
+  }
+}
+
+// Prints the calibration result to the PC console.
+void printCalResult() {
+  const CalRef& ref = CAL_REFS[calRefIndex];
+
+  Serial.println("=== CALIBRATION CHECK ===");
+  Serial.print("Reference: "); Serial.println(ref.name);
+  Serial.print("R="); Serial.print(calResult.r, 1);
+  Serial.print("  X="); Serial.print(calResult.x, 1);
+  Serial.print("  SWR="); Serial.println(calResult.swr, 2);
+  if (!calResult.valid) {
+    Serial.println("RESULT: INVALID (no/bogus reading)");
+    return;
+  }
+  if (ref.isOpen || ref.isShort) {
+    Serial.print("RESULT: "); Serial.println(calResult.pass ? "PASS" : "FAIL");
+  } else {
+    Serial.print("Deviation: "); Serial.print(calResult.devPct, 1);
+    Serial.print(" %  RESULT: "); Serial.println(calResult.pass ? "PASS" : "FAIL");
+  }
 }
 
 // ======================================================================
@@ -354,7 +505,14 @@ void processLine(char* line) {
   Measurement m;
   if (parseFRXLine(s, m)) {
     storePoint(m);
-    if (collecting && scanCount >= POINTS_PER_SCAN) {
+    if (calMeasuring) {
+      // Single-point calibration reference measurement (frx0 -> one line).
+      evaluateCalibration(m, calResult);
+      calMeasuring = false;
+      collecting  = false;
+      currentState = STATE_DISPLAYING;
+      printCalResult();
+    } else if (collecting && scanCount >= POINTS_PER_SCAN) {
       collecting = false;
       currentState = STATE_DISPLAYING;
     }
@@ -419,8 +577,19 @@ void updateDisplay() {
   tft.setCursor(80, 6);
   switch (currentState) {
     case STATE_IDLE:       tft.print("IDLE"); break;
+    case STATE_CALIBRATE:  tft.print("CALIBRATE"); break;
     case STATE_SCANNING:   tft.print("SCANNING..."); break;
-    case STATE_DISPLAYING: tft.print("PRESS START"); break;
+    case STATE_DISPLAYING: tft.print(calActive ? "CAL RESULT" : "PRESS START"); break;
+  }
+
+  // Calibration screens take over the page body.
+  if (currentState == STATE_CALIBRATE) {
+    drawCalPrompt();
+    return;
+  }
+  if (calActive && currentState == STATE_DISPLAYING) {
+    drawCalResult();
+    return;
   }
 
   if (scanCount == 0) {
@@ -440,6 +609,64 @@ void updateDisplay() {
   } else {
     drawNumeric();
   }
+}
+
+// Calibration prompt: tells the user which reference to connect and how.
+void drawCalPrompt() {
+  const CalRef& ref = CAL_REFS[calRefIndex];
+
+  tft.fillRect(0, 26, 320, 240 - 26, ILI9341_BLACK);
+  tft.setTextSize(2);
+  tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
+  tft.setCursor(20, 40);
+  tft.print("CALIBRATE");
+  tft.setTextSize(1);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(20, 80);
+  tft.print("Reference: ");
+  tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
+  tft.print(ref.name);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(20, 110);
+  tft.print("Connect load, press START");
+  tft.setCursor(20, 140);
+  tft.print("[BAND] change  [START] run");
+  tft.setCursor(20, 160);
+  tft.print("[MODE] cancel");
+}
+
+// Calibration result: PASS/FAIL, R/X/SWR and deviation from the reference.
+void drawCalResult() {
+  const CalRef& ref = CAL_REFS[calRefIndex];
+
+  tft.fillRect(0, 26, 320, 240 - 26, ILI9341_BLACK);
+
+  tft.setTextSize(2);
+  if (!calResult.valid) {
+    tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
+    tft.setCursor(20, 40);
+    tft.print("NO READING");
+  } else {
+    tft.setTextColor(calResult.pass ? ILI9341_GREEN : ILI9341_RED, ILI9341_BLACK);
+    tft.setCursor(20, 40);
+    tft.print(calResult.pass ? "PASS" : "FAIL");
+  }
+
+  tft.setTextSize(1);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(20, 80);
+  tft.print("Ref: "); tft.print(ref.name);
+  tft.setCursor(20, 104);
+  tft.print("R="); tft.print(calResult.r, 1);
+  tft.print("  X="); tft.print(calResult.x, 1);
+  tft.setCursor(20, 124);
+  tft.print("SWR="); tft.print(calResult.swr, 2);
+  if (!(ref.isOpen || ref.isShort)) {
+    tft.setCursor(20, 144);
+    tft.print("Dev "); tft.print(calResult.devPct, 1); tft.print(" %");
+  }
+  tft.setCursor(20, 176);
+  tft.print("[START] exit  [BAND] new");
 }
 
 // Scales scanPoints[] into the plot area and draws the SWR curve.

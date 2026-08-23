@@ -105,11 +105,12 @@ Built with **PlatformIO** + Arduino framework, board `uno_r4_minima` (config: [`
 ✅ **Full 160 m → 10 m sweep recorded** (IARU **Region 1**, 100 points/band) in [`result.md`](result.md) and [`result_data.json`](result_data.json); per-band and combined SWR graphs rendered to PDF in [`graphs/`](graphs).
 🖥️ **Display selected**: Waveshare 2.4" SPI LCD (ILI9341, 240x320, 65K colour), 3.3 V logic.
 🎛️ **Controls + UI implemented**: four buttons (START D2 / BAND D3 / MODE D4 / CAL D5) drive an ILI9341 SWR curve + numeric readout in `src/main.cpp`.
-✅ **Builds cleanly with PlatformIO** (`renesas-ra` platform, `uno_r4_minima` board) — RAM 29.6%, Flash 24.4%.
+✅ **Calibration implemented**: CAL runs a reference-based performance check (50/25/75/100 Ω, open, short) — BAND cycles the reference, START measures, PASS/FAIL + % deviation shown on the display and serial.
+✅ **Builds cleanly with PlatformIO** (`renesas-ra` platform, `uno_r4_minima` board) — RAM 29.7%, Flash 25.2%.
 
 ## 🚀 Next Steps
 1.  **Verify on hardware:** Confirm ILI9341 rendering + four-button workflow against a real display.
 2.  **State Machine & Workflow:** Finalize **IDLE $\rightarrow$ CALIBRATE $\rightarrow$ SELECT\_BAND $\rightarrow$ SCANNING $\rightarrow$ DISPLAYING**.
-3.  **True Calibration:** Split CAL into a proper open/short/load self-calibration rather than a re-scan.
-4.  **Menu/Touch:** Optional rotary or touch control to extend band/mode selection.
-5.  **[DONE] Verification:** Full-band sweep verified against a 50 Ω reference load across all HF bands; results and graphs generated.
+3.  **Menu/Touch:** Optional rotary or touch control to extend band/mode selection.
+4.  **[DONE] Verification:** Full-band sweep verified against a 50 Ω reference load across all HF bands; results and graphs generated.
+5.  **[DONE] Calibration:** CAL now performs an open/short/load reference check (PASS/FAIL + deviation), not just a re-scan.
