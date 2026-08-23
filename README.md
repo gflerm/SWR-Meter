@@ -151,6 +151,8 @@ See the assembly photo above. Demo video: [AA-30.ZERO demo](media/aa30_zero_demo
 - [`AA-30_ZERO_getting_started.md`](docs/AA-30_ZERO_getting_started.md) — board overview & Arduino pairing
 - `docs/display_wiring.pdf` — display + button wiring reference (Waveshare 2.4" SPI / ILI9341)
 - [`docs/firmware_reference.md`](docs/firmware_reference.md) — firmware functions, state machine & serial protocol
+- [`docs/SPEC_SKELETON.md`](docs/SPEC_SKELETON.md) — reusable build-and-verify spec template + lessons learned
+- [`tests/`](tests/) — deterministic firmware test suite ([`README.md`](tests/README.md), log)
 
 ## 🔨 Build / Upload
 
