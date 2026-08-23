@@ -90,6 +90,7 @@ struct CalResult {
 };
 
 enum SystemState {
+  STATE_WELCOME,
   STATE_IDLE,
   STATE_CALIBRATE,
   STATE_SCANNING,
@@ -146,7 +147,7 @@ const CalRef CAL_REFS[] = {
 // GLOBALS
 // ======================================================================
 
-SystemState  currentState = STATE_IDLE;
+SystemState  currentState = STATE_WELCOME;
 DisplayMode  displayMode  = MODE_CURVE;
 uint8_t      bandIndex    = 0;
 
@@ -175,6 +176,7 @@ void pollAnalyzer();
 void processLine(char* line);
 void updateDisplay();
 void displayWelcome();
+void drawWelcome();
 void drawCurve(const Band& b);
 void drawNumeric();
 void startCalibrate();
@@ -240,6 +242,15 @@ void loop() {
 
 void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, bool calPressed) {
   switch (currentState) {
+    case STATE_WELCOME:
+      // Boot-up instructions page: any button advances to IDLE.
+      drawWelcome();
+      if (startPressed || bandPressed || modePressed || calPressed) {
+        currentState = STATE_IDLE;
+        updateDisplay();
+      }
+      break;
+
     case STATE_IDLE:
       // BAND cycles the selected HF band.
       if (bandPressed) {
@@ -544,24 +555,66 @@ void processLine(char* line) {
 // DISPLAY
 // ======================================================================
 
+// Full-screen welcome + button instructions shown on boot (STATE_WELCOME).
 void displayWelcome() {
   tft.fillScreen(ILI9341_BLACK);
-  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+
+  // Title block.
+  tft.fillRect(0, 0, 320, 44, ILI9341_BLUE);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLUE);
   tft.setTextSize(2);
-  tft.setCursor(20, 40);
+  tft.setCursor(16, 8);
   tft.print("SWR METER");
-  tft.setCursor(20, 70);
   tft.setTextSize(1);
+  tft.setCursor(16, 30);
   tft.print("Uno R4 + AA-30.ZERO");
-  tft.setCursor(20, 90);
-  tft.print("Bands: [BAND], Scan: [START]");
-  tft.setCursor(20, 104);
-  tft.print("Mode: [MODE], Cal: [CAL]");
+
+  // Button instruction rows.
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setTextSize(1);
+
+  tft.setCursor(16, 58);
+  tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
+  tft.print("[BAND]");
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(84, 58);
+  tft.print("Select HF band (160m-10m)");
+
+  tft.setCursor(16, 84);
+  tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
+  tft.print("[START]");
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(84, 84);
+  tft.print("Scan current band");
+
+  tft.setCursor(16, 110);
+  tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
+  tft.print("[MODE]");
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(84, 110);
+  tft.print("Curve / numeric readout");
+
+  tft.setCursor(16, 136);
+  tft.setTextColor(ILI9341_ORANGE, ILI9341_BLACK);
+  tft.print("[CAL]");
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(84, 136);
+  tft.print("Calibration check");
+
+  tft.setCursor(16, 172);
+  tft.setTextColor(ILI9341_LIGHTGREY, ILI9341_BLACK);
+  tft.print("Press any button to continue");
 
   Serial.println("==========================================================");
   Serial.println("SWR METER BOOTED: Uno R4 Minima + AA-30 Zero + ILI9341");
   Serial.println("[BAND] band  [START] scan  [MODE] layout  [CAL] calibrate");
   Serial.println("==========================================================");
+}
+
+// Re-draws the welcome screen from the state machine (kept separate so the
+// boot-time call in setup() and the state-machine path share the same page).
+void drawWelcome() {
+  displayWelcome();
 }
 
 // Draws the page chrome + either a curve or numeric readout from scanPoints[].
@@ -576,6 +629,7 @@ void updateDisplay() {
   tft.print(b.name);
   tft.setCursor(80, 6);
   switch (currentState) {
+    case STATE_WELCOME:    tft.print("WELCOME"); break;
     case STATE_IDLE:       tft.print("IDLE"); break;
     case STATE_CALIBRATE:  tft.print("CALIBRATE"); break;
     case STATE_SCANNING:   tft.print("SCANNING..."); break;
