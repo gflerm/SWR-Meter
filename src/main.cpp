@@ -191,6 +191,10 @@ char      lineBuf[LINE_BUF];
 uint8_t   lineLen = 0;
 bool      collecting = false;  // true while awaiting frx data
 
+// PC command line assembler (lines starting with '!' are device commands).
+char      pcCmdBuf[LINE_BUF];
+uint8_t   pcCmdLen = 0;
+
 // Calibration / performance-check state.
 uint8_t    calPhase     = CAL_PHASE_50;   // current wizard phase
 uint8_t    calBandIndex = 0;              // band currently being swept
@@ -235,6 +239,12 @@ void drawCalProgress();
 void drawCalDone();
 bool isValidReading(float r, float x);
 float computeSWR(float r, float x);
+void emitState(const char* state);
+void emitBand();
+void emitMode();
+void emitCalPhase();
+void emitCalProgress();
+void handlePcCommands(bool& s, bool& b, bool& m, bool& c);
 
 // ======================================================================
 // SETUP / LOOP
@@ -257,6 +267,7 @@ void setup() {
   tft.fillScreen(ILI9341_BLACK);
 
   displayWelcome();
+  emitState("WELCOME");
 }
 
 void loop() {
@@ -273,20 +284,90 @@ void loop() {
     lastDebounce = now;
   }
 
+  // PC soft-button commands + passthrough (lines starting with '!').
+  handlePcCommands(startPressed, bandPressed, modePressed, calPressed);
+
   handleStateMachine(startPressed, bandPressed, modePressed, calPressed);
 
   // Always absorb any analyzer bytes into the line buffer; in scan mode the
   // completion of the stream (a trailing "OK") drives the state transition.
   pollAnalyzer();
 
-  // In IDLE we also pass through PC -> analyzer (lets external tools drive it).
-  if (currentState == STATE_IDLE) {
-    while (Serial.available()) {
-      AA_PORT.write(Serial.read());
+  delay(2);
+}
+
+// ======================================================================
+// PC TELEMETRY + COMMANDS
+// ======================================================================
+
+// Machine-readable state line for the simulator (starts with '@').
+void emitState(const char* state) {
+  Serial.print("@STATE:");
+  Serial.println(state);
+}
+
+void emitBand() {
+  Serial.print("@BAND:");
+  Serial.println(BANDS[bandIndex].name);
+}
+
+void emitMode() {
+  Serial.print("@MODE:");
+  Serial.println(displayMode == MODE_CURVE ? "curve" : "numeric");
+}
+
+void emitCalPhase() {
+  Serial.print("@CALPHASE:");
+  Serial.print((int)calPhase + 1);
+  Serial.print("/");
+  Serial.println(NUM_CAL_PHASES);
+}
+
+void emitCalProgress() {
+  Serial.print("@CALPROG:band=");
+  Serial.print((int)calBandIndex + 1);
+  Serial.print("/");
+  Serial.print(NUM_BANDS);
+  Serial.print(",pt=");
+  Serial.print((int)calPoint + 1);
+  Serial.print("/");
+  Serial.println(CAL_PTS_PER_BAND);
+}
+
+// Reads PC serial: lines starting with '!' are soft-button commands; anything
+// else is passed through to the AA-30 while in IDLE. Sets the button flags.
+void handlePcCommands(bool& s, bool& b, bool& m, bool& c) {
+  while (Serial.available()) {
+    char ch = (char)Serial.read();
+
+    if (ch == '\n') {
+      pcCmdBuf[pcCmdLen < LINE_BUF - 1 ? pcCmdLen : LINE_BUF - 1] = '\0';
+      if (pcCmdBuf[0] == '!') {
+        // Soft-button command.
+        if      (strcmp(pcCmdBuf, "!BTN:START") == 0) s = true;
+        else if (strcmp(pcCmdBuf, "!BTN:BAND")  == 0) b = true;
+        else if (strcmp(pcCmdBuf, "!BTN:MODE")  == 0) m = true;
+        else if (strcmp(pcCmdBuf, "!BTN:CAL")   == 0) c = true;
+        else if (strcmp(pcCmdBuf, "!GET:STATE") == 0) {
+          emitState(currentState == STATE_WELCOME ? "WELCOME"
+                  : currentState == STATE_IDLE ? "IDLE"
+                  : currentState == STATE_CALIBRATE ? "CALIBRATE"
+                  : currentState == STATE_CAL_DONE ? "CAL_DONE"
+                  : currentState == STATE_SCANNING ? "SCANNING"
+                  : "DISPLAYING");
+          emitBand();
+          emitMode();
+        }
+      } else if (currentState == STATE_IDLE) {
+        // Pass non-command line through to the analyzer.
+        AA_PORT.write(pcCmdBuf, strlen(pcCmdBuf));
+        AA_PORT.write('\n');
+      }
+      pcCmdLen = 0;
+    } else if (ch != '\r') {
+      if (pcCmdLen < LINE_BUF - 1) pcCmdBuf[pcCmdLen++] = ch;
     }
   }
-
-  delay(2);
 }
 
 // ======================================================================
@@ -300,6 +381,9 @@ void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, b
       drawWelcome();
       if (startPressed || bandPressed || modePressed || calPressed) {
         currentState = STATE_IDLE;
+        emitState("IDLE");
+        emitBand();
+        emitMode();
         updateDisplay();
       }
       break;
@@ -308,12 +392,14 @@ void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, b
       // BAND cycles the selected HF band.
       if (bandPressed) {
         bandIndex = (bandIndex + 1) % NUM_BANDS;
+        emitBand();
         Serial.print("Band selected: ");
         Serial.println(BANDS[bandIndex].name);
       }
       // MODE toggles the display layout.
       if (modePressed) {
         displayMode = (displayMode == MODE_CURVE) ? MODE_NUMERIC : MODE_CURVE;
+        emitMode();
         Serial.print("Display mode: ");
         Serial.println(displayMode == MODE_CURVE ? "curve" : "numeric");
       }
@@ -387,6 +473,9 @@ void startScan() {
   uint32_t center = (b.low + b.high) / 2;
   uint32_t span   = b.high - b.low;
 
+  emitState("SCANNING");
+  emitBand();
+
   Serial.print("Scanning ");
   Serial.print(b.name);
   Serial.print("  center=");
@@ -425,6 +514,8 @@ void startCalibrate() {
   calFailCount = 0;
   scanCount    = 0;
   currentState = STATE_CALIBRATE;
+  emitState("CALIBRATE");
+  emitCalPhase();
   Serial.println("=== CALIBRATION WIZARD ===");
   Serial.println(calPhasePrompt());
   Serial.println("Press START to begin, MODE to exit.");
@@ -441,6 +532,7 @@ void calBeginBandSweep() {
   calMeasuring = true;
   collecting   = true;
 
+  emitCalProgress();
   Serial.print("Cal sweep band ");
   Serial.print(calBandIndex + 1);
   Serial.print("/");
@@ -473,6 +565,7 @@ void calHandlePoint(const Measurement& m) {
     cb.count = calPoint + 1;
     calPoint++;
   }
+  emitCalProgress();
 }
 
 // Called once a band sweep's points have been collected.
@@ -538,11 +631,13 @@ void calFinishPhase() {
     Serial.println(" bands within tolerance.");
     calPhase = CAL_PHASE_SHORT;
     calTotalPass = 0;
+    emitCalPhase();
     Serial.println(calPhasePrompt());
     Serial.println("Press START to verify.");
   } else if (calPhase == CAL_PHASE_SHORT) {
     calPhase = CAL_PHASE_OPEN;
     calTotalPass = 0;
+    emitCalPhase();
     Serial.println(calPhasePrompt());
     Serial.println("Press START to verify.");
   } else {
@@ -550,6 +645,7 @@ void calFinishPhase() {
     calDone   = true;
     calPassed = (calFailCount == 0);
     currentState = STATE_CAL_DONE;
+    emitState("CAL_DONE");
     Serial.print("CALIBRATION ");
     Serial.println(calPassed ? "PASSED" : "FAILED");
   }
@@ -739,6 +835,14 @@ void processLine(char* line) {
     snprintf(buf, sizeof(buf), "F=%.6fMHz R=%.1f X=%.1f SWR=%.2f",
              m.freqMHz, m.r, m.x, m.swr);
     Serial.println(buf);
+    // Machine-readable point for the simulator.
+    snprintf(buf, sizeof(buf), "@POINT:%.6f,%.2f,%.2f,%.2f",
+             m.freqMHz, m.r, m.x, m.swr);
+    Serial.println(buf);
+    if (currentState == STATE_DISPLAYING) {
+      emitState("DISPLAYING");
+      emitBand();
+    }
   } else if (strcasecmp(s, "OK") == 0) {
     Serial.println("<AA-30 OK>");
     // Only the trailing frx OK (which arrives after points, scanCount > 0)
@@ -747,6 +851,8 @@ void processLine(char* line) {
     if (collecting && scanCount > 0 && !calMeasuring) {
       collecting = false;
       currentState = STATE_DISPLAYING;
+      emitState("DISPLAYING");
+      emitBand();
     }
   } else if (!hasComma) {
     // Non-data response (e.g. "AA-30.ZERO 200").

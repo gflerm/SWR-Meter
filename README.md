@@ -109,8 +109,10 @@ See [`docs/AA-30_ZERO_data_exchange_protocol.md`](docs/AA-30_ZERO_data_exchange_
   (band + point + bar) is shown during calibration.
   Built with **PlatformIO** + Arduino framework (requires **Adafruit_GFX** and
   **Adafruit_ILI9341**, declared automatically in `platformio.ini`).
-- **`python/`** — `sweep_bands.py` (drive the analyzer + record results) and
-  `graph_results.py` (render PDF graphs with matplotlib).
+- **`python/`** — `sweep_bands.py` (drive the analyzer + record results),
+  `graph_results.py` (render PDF graphs with matplotlib), and
+  `sim_display.py` (**Windows simulator GUI**: emulates the ILI9341 display and
+  provides soft START/BAND/MODE/CAL buttons that drive the unit over serial).
 
 ## 📊 Results & Graphs
 
@@ -163,6 +165,23 @@ Config: [`platformio.ini`](platformio.ini); source: `src/main.cpp`. The Adafruit
 GFX + ILI9341 libraries are pulled automatically via `lib_deps`.
 
 USB CDC console: 115200 baud. AA-30 UART: 38400 baud (`Serial1`).
+
+### PC Simulator (test the UI without pressing buttons)
+
+`python/sim_display.py` shows the ILI9341 screen on your PC and adds soft
+START/BAND/MODE/CAL buttons that inject presses into the firmware over the USB
+CDC serial port. Requires `pyserial` and `pillow`:
+
+```sh
+pip install pyserial pillow
+python python/sim_display.py --port COMxx      # real hardware
+python python/sim_display.py --mock            # offline demo (no serial)
+```
+
+The firmware emits machine-readable telemetry (`@STATE:`, `@BAND:`, `@POINT:`,
+`@CAL*`) that the simulator uses to render each screen exactly, including the
+calibration progress (band + point + bar). Soft buttons send `!BTN:...`
+commands; non-command serial lines still pass through to the AA-30 in IDLE.
 
 ## 🚀 Next Steps
 
