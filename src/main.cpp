@@ -58,6 +58,10 @@
 // Button debounce (ms).
 #define DEBOUNCE_MS 25
 
+// If a scan or calibration sweep receives no valid data within this time,
+// abort back to IDLE so the unit never hangs waiting on a silent analyzer.
+#define SCAN_TIMEOUT_MS 8000
+
 // ======================================================================
 // INCLUDES
 // ======================================================================
@@ -191,6 +195,13 @@ char      lineBuf[LINE_BUF];
 uint8_t   lineLen = 0;
 bool      collecting = false;  // true while awaiting frx data
 
+// Timestamp when the last scan/calibration sweep started (for timeout).
+uint32_t  sweepStart = 0;
+
+// Transient on-screen message (e.g. "Aborted") shown briefly after an event.
+const char* statusMsg = NULL;
+uint32_t    statusMsgUntil = 0;
+
 // PC command line assembler (lines starting with '!' are device commands).
 char      pcCmdBuf[LINE_BUF];
 uint8_t   pcCmdLen = 0;
@@ -237,6 +248,7 @@ void applyCalibration(Measurement& m);
 void drawCalPrompt();
 void drawCalProgress();
 void drawCalDone();
+void drawStatusOverlay();
 bool isValidReading(float r, float x);
 float computeSWR(float r, float x);
 void emitState(const char* state);
@@ -245,6 +257,8 @@ void emitMode();
 void emitCalPhase();
 void emitCalProgress();
 void handlePcCommands(bool& s, bool& b, bool& m, bool& c);
+bool isSweepStuck(uint32_t now);
+void showStatus(const char* msg, uint32_t ms);
 
 // ======================================================================
 // SETUP / LOOP
@@ -287,6 +301,20 @@ void loop() {
   // PC soft-button commands + passthrough (lines starting with '!').
   handlePcCommands(startPressed, bandPressed, modePressed, calPressed);
 
+  // Try to abort a stuck scan/calibration sweep (silent analyzer) on a
+  // timeout or any button press, so the unit stays responsive.
+  if (isSweepStuck(now) || startPressed || bandPressed || modePressed || calPressed) {
+    if (currentState == STATE_SCANNING || (currentState == STATE_CALIBRATE && calMeasuring)) {
+      collecting   = false;
+      calMeasuring = false;
+      currentState = STATE_IDLE;
+      showStatus("Aborted", 1500);
+      emitState("IDLE");
+      emitBand();
+      emitMode();
+    }
+  }
+
   handleStateMachine(startPressed, bandPressed, modePressed, calPressed);
 
   // Always absorb any analyzer bytes into the line buffer; in scan mode the
@@ -304,6 +332,18 @@ void loop() {
 void emitState(const char* state) {
   Serial.print("@STATE:");
   Serial.println(state);
+}
+
+// Returns true if a scan/calibration sweep has received no data for too long.
+bool isSweepStuck(uint32_t now) {
+  if (!collecting) return false;
+  return (now - sweepStart) > SCAN_TIMEOUT_MS;
+}
+
+// Shows a transient message on screen for `ms` milliseconds.
+void showStatus(const char* msg, uint32_t ms) {
+  statusMsg = msg;
+  statusMsgUntil = millis() + ms;
 }
 
 void emitBand() {
@@ -467,6 +507,7 @@ void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, b
 void startScan() {
   scanCount   = 0;
   collecting  = true;
+  sweepStart  = millis();
   currentState = STATE_SCANNING;
 
   const Band& b = BANDS[bandIndex];
@@ -531,6 +572,7 @@ void calBeginBandSweep() {
   calPoint     = 0;
   calMeasuring = true;
   collecting   = true;
+  sweepStart   = millis();
 
   emitCalProgress();
   Serial.print("Cal sweep band ");
@@ -974,6 +1016,7 @@ void updateDisplay() {
     tft.print("Press [START]");
     tft.setCursor(50, 150);
     tft.print("to scan");
+    drawStatusOverlay();
     return;
   }
 
@@ -982,6 +1025,20 @@ void updateDisplay() {
   } else {
     drawNumeric();
   }
+  drawStatusOverlay();
+}
+
+// Draws a transient status message (e.g. "Aborted") for a short time.
+void drawStatusOverlay() {
+  if (statusMsg == NULL || millis() > statusMsgUntil) return;
+  tft.setTextSize(2);
+  tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
+  tft.setCursor(80, 60);
+  tft.print(statusMsg);
+  tft.setTextSize(1);
+  tft.setTextColor(ILI9341_LIGHTGREY, ILI9341_BLACK);
+  tft.setCursor(60, 92);
+  tft.print("Press any button...");
 }
 
 // Calibration prompt: which reference to connect and what to do.

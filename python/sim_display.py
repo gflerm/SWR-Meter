@@ -29,6 +29,7 @@ import os
 import queue
 import re
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk
 
@@ -498,6 +499,7 @@ class SimulatorApp:
         self.mock = mock
         self.model = ScreenModel()
         self.rx_queue = queue.Queue()
+        self.paused = False
 
         self._build_ui()
 
@@ -558,6 +560,11 @@ class SimulatorApp:
         self.connect_btn = ttk.Button(top, text="Connect", command=self._toggle_conn)
         self.connect_btn.grid(row=0, column=4, padx=8)
 
+        # Reset the MCU (1200 baud touch) on connect so the welcome screen shows.
+        self.reset_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(top, text="Reset on connect", variable=self.reset_var).grid(
+            row=0, column=5, padx=8)
+
         # Display canvas (scaled)
         self.display_img = None
         self.canvas = tk.Canvas(top, width=W * self.SCALE, height=H * self.SCALE,
@@ -581,20 +588,43 @@ class SimulatorApp:
         # Log
         logframe = ttk.LabelFrame(top, text="Serial log", padding=4)
         logframe.grid(row=3, column=0, columnspan=6, sticky="nsew", pady=6)
-        self.log = tk.Text(logframe, height=10, width=90, state="disabled",
-                           font=("Consolas", 9))
+
+        logwrap = ttk.Frame(logframe)
+        logwrap.pack(side="left", fill="both", expand=True)
+        self.log = tk.Text(logwrap, height=12, width=100, state="disabled",
+                           wrap="word", font=("Consolas", 9),
+                           yscrollcommand=None)
         self.log.pack(side="left", fill="both", expand=True)
-        sb = ttk.Scrollbar(logframe, command=self.log.yview)
+        sb = ttk.Scrollbar(logwrap, command=self.log.yview)
         sb.pack(side="right", fill="y")
         self.log.configure(yscrollcommand=sb.set)
 
+        btns = ttk.Frame(logframe)
+        btns.pack(side="top", fill="x", pady=(4, 0))
+        ttk.Button(btns, text="Clear", command=self._clear_log).pack(side="left")
+        ttk.Button(btns, text="Pause", command=self._toggle_pause).pack(side="left", padx=6)
+
     def _log(self, text):
+        ts = time.strftime("%H:%M:%S")
         self.log.configure(state="normal")
-        self.log.insert("end", text + "\n")
-        self.log.see("end")
+        self.log.insert("end", f"[{ts}] {text}\n")
+        # Only auto-scroll when not paused, so the user can scroll back manually.
+        if not self.paused:
+            self.log.see("end")
         self.log.configure(state="disabled")
 
+    def _clear_log(self):
+        self.log.configure(state="normal")
+        self.log.delete("1.0", "end")
+        self.log.configure(state="disabled")
+
+    def _toggle_pause(self):
+        self.paused = not self.paused
+        self._log("-- log paused --" if self.paused else "-- log resumed --")
+
     def connect(self):
+        if self.reset_var.get():
+            self._reset_target()
         try:
             self.ser = serial.Serial(self.port_var.get(),
                                      int(self.baud_var.get()), timeout=0.1)
@@ -604,6 +634,20 @@ class SimulatorApp:
         except Exception as exc:
             self._log(f"Connect failed: {exc}")
             self.ser = None
+
+    def _reset_target(self):
+        """War-reset the Uno R4 by reopening at 1200 baud (Arduino 1200bps
+        touch convention), so the firmware reboots and shows the welcome
+        screen."""
+        port = self.port_var.get()
+        try:
+            self._log(f"Resetting {port} (1200 baud touch)...")
+            temp = serial.Serial(port, 1200, timeout=0.1)
+            temp.dtr = False
+            temp.close()
+            time.sleep(0.5)  # let the bootloader run
+        except Exception as exc:
+            self._log(f"Reset touch failed: {exc}")
 
     def disconnect(self):
         if self.ser:
