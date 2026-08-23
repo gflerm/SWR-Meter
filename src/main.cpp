@@ -62,6 +62,7 @@
 // INCLUDES
 // ======================================================================
 #include <Arduino.h>
+#include <EEPROM.h>
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
@@ -93,6 +94,7 @@ enum SystemState {
   STATE_WELCOME,
   STATE_IDLE,
   STATE_CALIBRATE,
+  STATE_CAL_DONE,
   STATE_SCANNING,
   STATE_DISPLAYING
 };
@@ -143,6 +145,36 @@ const CalRef CAL_REFS[] = {
 };
 #define NUM_CAL_REFS (sizeof(CAL_REFS) / sizeof(CAL_REFS[0]))
 
+// ---- Calibration wizard / correction table ---------------------------
+// The wizard sweeps every HF band against reference loads, then stores a
+// per-band per-point R/X offset table in EEPROM. Normal sweeps apply the
+// nearest stored offset to correct the analyzer readings.
+#define CAL_PTS_PER_BAND 20   // sweep points per band during calibration
+#define CAL_EEPROM_MAGIC 0x4C4E31  // "CAL1" marker
+#define CAL_EEPROM_ADDR  0
+
+// One correction entry: an additive offset to apply at a given frequency.
+typedef struct {
+  float freqMHz;  // measurement frequency (MHz)
+  float rCorr;    // add to measured R to get corrected R
+  float xCorr;    // add to measured X to get corrected X
+} CalPoint;
+
+// Correction table for one band (CAL_PTS_PER_BAND entries).
+typedef struct {
+  bool     valid;
+  uint8_t  count;
+  CalPoint pts[CAL_PTS_PER_BAND];
+} CalBand;
+
+// Calibration wizard phases (in order).
+enum CalPhase {
+  CAL_PHASE_50,     // sweep 50 ohm -> build offsets
+  CAL_PHASE_SHORT,  // verify with a short
+  CAL_PHASE_OPEN    // verify with an open
+};
+#define NUM_CAL_PHASES 3
+
 // ======================================================================
 // GLOBALS
 // ======================================================================
@@ -160,10 +192,20 @@ uint8_t   lineLen = 0;
 bool      collecting = false;  // true while awaiting frx data
 
 // Calibration / performance-check state.
-uint8_t    calRefIndex = 0;
-bool       calActive = false;
-bool       calMeasuring = false;
+uint8_t    calPhase     = CAL_PHASE_50;   // current wizard phase
+uint8_t    calBandIndex = 0;              // band currently being swept
+uint8_t    calPoint     = 0;              // points collected for current band
+bool       calActive    = false;          // wizard active
+bool       calMeasuring = false;          // a sweep is in progress
+bool       calDone      = false;          // wizard finished (summary shown)
+bool       calPassed    = false;          // overall pass/fail of the wizard
+uint8_t    calFailCount = 0;              // bands that failed (per phase)
+uint8_t    calTotalPass = 0;              // bands passed across all phases
 CalResult  calResult;
+
+// Correction tables (RAM copy, persisted to EEPROM).
+CalBand calTable[NUM_BANDS];
+bool    calValid = false;    // a valid correction table is loaded
 
 // ======================================================================
 // FORWARD DECLARATIONS
@@ -180,11 +222,19 @@ void drawWelcome();
 void drawCurve(const Band& b);
 void drawNumeric();
 void startCalibrate();
-void runCalMeasurement();
-void evaluateCalibration(const Measurement& m, CalResult& res);
-void printCalResult();
+void calNextPhase();
+void calBeginBandSweep();
+void calHandlePoint(const Measurement& m);
+void calFinishBand();
+void calFinishPhase();
+void saveCalibration();
+void loadCalibration();
+void applyCalibration(Measurement& m);
 void drawCalPrompt();
-void drawCalResult();
+void drawCalProgress();
+void drawCalDone();
+bool isValidReading(float r, float x);
+float computeSWR(float r, float x);
 
 // ======================================================================
 // SETUP / LOOP
@@ -198,6 +248,9 @@ void setup() {
 
   AA_PORT.begin(38400);   // AA-30 analyzer UART1
   Serial.begin(PC_BAUD);  // PC console / telemetry
+
+  EEPROM.begin();         // calibration persistence
+  loadCalibration();
 
   tft.begin();
   tft.setRotation(1);            // landscape (320x240)
@@ -276,21 +329,31 @@ void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, b
       break;
 
     case STATE_CALIBRATE:
-      // BAND cycles the reference load; MODE cancels back to IDLE.
-      if (bandPressed) {
-        calRefIndex = (calRefIndex + 1) % NUM_CAL_REFS;
-        Serial.print("Cal reference: ");
-        Serial.println(CAL_REFS[calRefIndex].name);
+      // While measuring we just show progress; buttons are ignored until done.
+      if (calMeasuring) {
+        updateDisplay();
+        break;
       }
+      // MODE cancels back to IDLE.
       if (modePressed) {
         calActive = false;
         currentState = STATE_IDLE;
       }
-      // START takes a single-frequency reference measurement.
-      if (startPressed && !calMeasuring) {
-        runCalMeasurement();
+      // START begins (or resumes) the current phase's band sweep.
+      if (startPressed) {
+        calBeginBandSweep();
       }
       updateDisplay();
+      break;
+
+    case STATE_CAL_DONE:
+      // Summary screen: START or any button returns to IDLE.
+      drawCalDone();
+      if (startPressed || bandPressed || modePressed || calPressed) {
+        calActive = false;
+        currentState = STATE_IDLE;
+        updateDisplay();
+      }
       break;
 
     case STATE_SCANNING:
@@ -304,20 +367,7 @@ void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, b
       if (modePressed) {
         displayMode = (displayMode == MODE_CURVE) ? MODE_NUMERIC : MODE_CURVE;
       }
-      // During a calibration result, BAND picks a new reference and
-      // returns to the prompt; otherwise START returns to IDLE.
-      if (calActive) {
-        if (bandPressed) {
-          calRefIndex = (calRefIndex + 1) % NUM_CAL_REFS;
-          currentState = STATE_CALIBRATE;
-          Serial.print("Cal reference: ");
-          Serial.println(CAL_REFS[calRefIndex].name);
-        }
-        if (startPressed) {
-          calActive = false;
-          currentState = STATE_IDLE;
-        }
-      } else if (startPressed) {
+      if (startPressed) {
         currentState = STATE_IDLE;
       }
       break;
@@ -354,80 +404,232 @@ void startScan() {
 // CALIBRATION / PERFORMANCE CHECK
 // ======================================================================
 
-// Enters the calibration screen (does not measure yet; waits for [START]).
+// What the current phase expects the user to connect.
+const char* calPhasePrompt() {
+  switch (calPhase) {
+    case CAL_PHASE_50:    return "Connect 50 ohm load";
+    case CAL_PHASE_SHORT: return "Connect SHORT";
+    default:              return "Connect OPEN";
+  }
+}
+
+// Enters the calibration wizard (first phase: 50 ohm reference).
 void startCalibrate() {
   calActive    = true;
   calMeasuring = false;
+  calDone      = false;
+  calPhase     = CAL_PHASE_50;
+  calBandIndex = 0;
+  calPoint     = 0;
+  calTotalPass = 0;
+  calFailCount = 0;
   scanCount    = 0;
   currentState = STATE_CALIBRATE;
-  Serial.println("CALIBRATE: connect a reference load and press START.");
+  Serial.println("=== CALIBRATION WIZARD ===");
+  Serial.println(calPhasePrompt());
+  Serial.println("Press START to begin, MODE to exit.");
 }
 
-// Takes a single-frequency measurement at the current band centre against
-// the selected reference (fq + sw0 + frx0). Results arrive in pollAnalyzer().
-void runCalMeasurement() {
-  const Band& b = BANDS[bandIndex];
+// Begins sweeping the current band against the current reference. Each band
+// is swept with CAL_PTS_PER_BAND points via fq + sw + frx(N-1).
+void calBeginBandSweep() {
+  const Band& b = BANDS[calBandIndex];
   uint32_t center = (b.low + b.high) / 2;
+  uint32_t span   = b.high - b.low;
 
-  scanCount   = 0;
-  collecting  = true;
+  calPoint     = 0;
   calMeasuring = true;
-  currentState = STATE_CALIBRATE;   // remains until a valid point arrives
+  collecting   = true;
 
-  Serial.print("Cal measure @ ");
-  Serial.print(center);
-  Serial.print(" Hz, ref=");
-  Serial.println(CAL_REFS[calRefIndex].name);
+  Serial.print("Cal sweep band ");
+  Serial.print(calBandIndex + 1);
+  Serial.print("/");
+  Serial.print(NUM_BANDS);
+  Serial.print(" (");
+  Serial.print(b.name);
+  Serial.print(") ref=");
+  Serial.println(calPhasePrompt());
 
   AA_PORT.print("fq"); AA_PORT.println(center);
-  AA_PORT.println("sw0");
-  AA_PORT.println("frx0");
+  AA_PORT.print("sw"); AA_PORT.println(span);
+  AA_PORT.print("frx"); AA_PORT.println(CAL_PTS_PER_BAND - 1);
 }
 
-// Compares a measurement against the selected reference and fills calResult.
-void evaluateCalibration(const Measurement& m, CalResult& res) {
-  const CalRef& ref = CAL_REFS[calRefIndex];
-
-  res.valid   = m.valid;
-  res.r       = m.r;
-  res.x       = m.x;
-  res.swr     = m.swr;
-  res.refName = ref.name;
-  res.pass    = false;
-  res.devPct  = 0.0f;
-
+// Handles one parsed measurement arriving during a calibration band sweep.
+void calHandlePoint(const Measurement& m) {
   if (!m.valid) return;
 
-  if (ref.isOpen) {
-    // Open reference: expect a high impedance (large |R| or large |X|).
-    res.pass = (fabsf(m.r) > 500.0f) || (fabsf(m.x) > 500.0f);
-  } else if (ref.isShort) {
-    // Short reference: expect near-zero impedance.
-    res.pass = (fabsf(m.r) < 10.0f) && (fabsf(m.x) < 10.0f);
-  } else {
-    res.devPct = fabsf(m.r - ref.rExp) / ref.rExp * 100.0f;
-    res.pass   = (res.devPct <= ref.tolPct);
+  CalBand& cb = calTable[calBandIndex];
+  if (calPoint < CAL_PTS_PER_BAND) {
+    cb.pts[calPoint].freqMHz = m.freqMHz;
+    if (calPhase == CAL_PHASE_50) {
+      // Reference is 50 ohm: store the additive correction.
+      cb.pts[calPoint].rCorr = 50.0f - m.r;
+      cb.pts[calPoint].xCorr = 0.0f - m.x;
+    } else {
+      cb.pts[calPoint].rCorr = m.r;   // raw reading for short/open verification
+      cb.pts[calPoint].xCorr = m.x;
+    }
+    cb.count = calPoint + 1;
+    calPoint++;
   }
 }
 
-// Prints the calibration result to the PC console.
-void printCalResult() {
-  const CalRef& ref = CAL_REFS[calRefIndex];
+// Called once a band sweep's points have been collected.
+void calFinishBand() {
+  CalBand& cb = calTable[calBandIndex];
 
-  Serial.println("=== CALIBRATION CHECK ===");
-  Serial.print("Reference: "); Serial.println(ref.name);
-  Serial.print("R="); Serial.print(calResult.r, 1);
-  Serial.print("  X="); Serial.print(calResult.x, 1);
-  Serial.print("  SWR="); Serial.println(calResult.swr, 2);
-  if (!calResult.valid) {
-    Serial.println("RESULT: INVALID (no/bogus reading)");
+  if (calPhase == CAL_PHASE_50) {
+    cb.valid = (cb.count == CAL_PTS_PER_BAND);
+    if (cb.valid) {
+      // rCorr = 50 - R_raw, so |rCorr| is the absolute R error.
+      float rErr = 0.0f;
+      for (uint8_t i = 0; i < cb.count; i++) {
+        rErr += fabsf(cb.pts[i].rCorr);
+      }
+      rErr /= cb.count;
+      if (rErr / 50.0f * 100.0f <= 10.0f) calTotalPass++;
+    }
+  } else {
+    // SHORT: |R|,|X| both small.  OPEN: |R| or |X| large.
+    bool ok = false;
+    if (calPhase == CAL_PHASE_SHORT) {
+      ok = true;
+      for (uint8_t i = 0; i < cb.count; i++) {
+        if (fabsf(cb.pts[i].rCorr) >= 10.0f || fabsf(cb.pts[i].xCorr) >= 10.0f) {
+          ok = false;
+          break;
+        }
+      }
+    } else { // OPEN
+      for (uint8_t i = 0; i < cb.count; i++) {
+        if (fabsf(cb.pts[i].rCorr) > 500.0f || fabsf(cb.pts[i].xCorr) > 500.0f) {
+          ok = true;
+          break;
+        }
+      }
+    }
+    if (ok) calTotalPass++;
+    else    calFailCount++;
+  }
+
+  calBandIndex++;
+  if (calBandIndex < NUM_BANDS) {
+    calBeginBandSweep();
+  } else {
+    calFinishPhase();
+  }
+}
+
+// Advances to the next wizard phase, or finishes the wizard.
+void calFinishPhase() {
+  calMeasuring = false;
+  collecting   = false;
+  calBandIndex = 0;
+  calPoint     = 0;
+
+  if (calPhase == CAL_PHASE_50) {
+    // Persist the 50 ohm correction table now.
+    saveCalibration();
+    Serial.print("50 ohm phase: ");
+    Serial.print(calTotalPass);
+    Serial.print("/");
+    Serial.print(NUM_BANDS);
+    Serial.println(" bands within tolerance.");
+    calPhase = CAL_PHASE_SHORT;
+    calTotalPass = 0;
+    Serial.println(calPhasePrompt());
+    Serial.println("Press START to verify.");
+  } else if (calPhase == CAL_PHASE_SHORT) {
+    calPhase = CAL_PHASE_OPEN;
+    calTotalPass = 0;
+    Serial.println(calPhasePrompt());
+    Serial.println("Press START to verify.");
+  } else {
+    // All phases done.
+    calDone   = true;
+    calPassed = (calFailCount == 0);
+    currentState = STATE_CAL_DONE;
+    Serial.print("CALIBRATION ");
+    Serial.println(calPassed ? "PASSED" : "FAILED");
+  }
+}
+
+// ---- EEPROM persistence ----------------------------------------------
+
+void saveCalibration() {
+  int addr = CAL_EEPROM_ADDR;
+  EEPROM.write(addr++, (CAL_EEPROM_MAGIC >> 24) & 0xFF);
+  EEPROM.write(addr++, (CAL_EEPROM_MAGIC >> 16) & 0xFF);
+  EEPROM.write(addr++, (CAL_EEPROM_MAGIC >> 8) & 0xFF);
+  EEPROM.write(addr++, CAL_EEPROM_MAGIC & 0xFF);
+
+  for (uint8_t b = 0; b < NUM_BANDS; b++) {
+    const CalBand& cb = calTable[b];
+    EEPROM.write(addr++, cb.valid ? 1 : 0);
+    for (uint8_t i = 0; i < CAL_PTS_PER_BAND; i++) {
+      const CalPoint& p = cb.pts[i];
+      EEPROM.put(addr, p.freqMHz); addr += sizeof(float);
+      EEPROM.put(addr, p.rCorr);   addr += sizeof(float);
+      EEPROM.put(addr, p.xCorr);   addr += sizeof(float);
+    }
+  }
+  Serial.println("Calibration table saved to EEPROM.");
+}
+
+void loadCalibration() {
+  int addr = CAL_EEPROM_ADDR;
+  uint32_t magic = 0;
+  magic |= (uint32_t)EEPROM.read(addr++) << 24;
+  magic |= (uint32_t)EEPROM.read(addr++) << 16;
+  magic |= (uint32_t)EEPROM.read(addr++) << 8;
+  magic |= (uint32_t)EEPROM.read(addr++);
+
+  calValid = false;
+  if (magic != CAL_EEPROM_MAGIC) {
+    Serial.println("No calibration table in EEPROM (fresh unit).");
     return;
   }
-  if (ref.isOpen || ref.isShort) {
-    Serial.print("RESULT: "); Serial.println(calResult.pass ? "PASS" : "FAIL");
-  } else {
-    Serial.print("Deviation: "); Serial.print(calResult.devPct, 1);
-    Serial.print(" %  RESULT: "); Serial.println(calResult.pass ? "PASS" : "FAIL");
+
+  for (uint8_t b = 0; b < NUM_BANDS; b++) {
+    CalBand& cb = calTable[b];
+    cb.valid = EEPROM.read(addr++) != 0;
+    cb.count = CAL_PTS_PER_BAND;
+    for (uint8_t i = 0; i < CAL_PTS_PER_BAND; i++) {
+      CalPoint& p = cb.pts[i];
+      EEPROM.get(addr, p.freqMHz); addr += sizeof(float);
+      EEPROM.get(addr, p.rCorr);   addr += sizeof(float);
+      EEPROM.get(addr, p.xCorr);   addr += sizeof(float);
+    }
+    if (cb.valid) calValid = true;
+  }
+  Serial.println(calValid ? "Calibration loaded from EEPROM." : "Calibration table empty.");
+}
+
+// Applies the nearest stored correction to a measurement (normal sweeps).
+void applyCalibration(Measurement& m) {
+  if (!calValid || !m.valid) return;
+
+  // Find the band containing this frequency.
+  for (uint8_t b = 0; b < NUM_BANDS; b++) {
+    if (!calTable[b].valid) continue;
+    float lo = BANDS[b].low / 1e6f;
+    float hi = BANDS[b].high / 1e6f;
+    if (m.freqMHz < lo - 0.01f || m.freqMHz > hi + 0.01f) continue;
+
+    const CalBand& cb = calTable[b];
+    // Nearest calibration point (simple lookup; points are ~evenly spaced).
+    int best = 0;
+    float bd = 1e9f;
+    for (uint8_t i = 0; i < cb.count; i++) {
+      float d = fabsf(cb.pts[i].freqMHz - m.freqMHz);
+      if (d < bd) { bd = d; best = i; }
+    }
+    m.r += cb.pts[best].rCorr;
+    m.x += cb.pts[best].xCorr;
+    m.swr = computeSWR(m.r, m.x);
+    m.valid = isValidReading(m.r, m.x) && m.swr >= 1.0f && m.swr <= MAX_SWR;
+    return;
   }
 }
 
@@ -515,17 +717,22 @@ void processLine(char* line) {
 
   Measurement m;
   if (parseFRXLine(s, m)) {
-    storePoint(m);
     if (calMeasuring) {
-      // Single-point calibration reference measurement (frx0 -> one line).
-      evaluateCalibration(m, calResult);
-      calMeasuring = false;
-      collecting  = false;
-      currentState = STATE_DISPLAYING;
-      printCalResult();
-    } else if (collecting && scanCount >= POINTS_PER_SCAN) {
-      collecting = false;
-      currentState = STATE_DISPLAYING;
+      // Calibration sweep in progress: route the point to the wizard.
+      calHandlePoint(m);
+      if (calPoint >= CAL_PTS_PER_BAND) {
+        calFinishBand();
+      }
+    } else {
+      // Normal sweep: apply stored calibration correction, then store.
+      applyCalibration(m);
+      if (m.valid) {
+        storePoint(m);
+        if (collecting && scanCount >= POINTS_PER_SCAN) {
+          collecting = false;
+          currentState = STATE_DISPLAYING;
+        }
+      }
     }
     // Telemetry to PC (6 decimals for MHz preserves narrow-band resolution).
     char buf[64];
@@ -535,8 +742,9 @@ void processLine(char* line) {
   } else if (strcasecmp(s, "OK") == 0) {
     Serial.println("<AA-30 OK>");
     // Only the trailing frx OK (which arrives after points, scanCount > 0)
-    // completes a scan; the fq/sw OKs arrive with scanCount == 0.
-    if (collecting && scanCount > 0) {
+    // completes a normal scan; the fq/sw OKs arrive with scanCount == 0.
+    // During calibration the wizard advances via calPoint, so ignore OK.
+    if (collecting && scanCount > 0 && !calMeasuring) {
       collecting = false;
       currentState = STATE_DISPLAYING;
     }
@@ -631,18 +839,23 @@ void updateDisplay() {
   switch (currentState) {
     case STATE_WELCOME:    tft.print("WELCOME"); break;
     case STATE_IDLE:       tft.print("IDLE"); break;
-    case STATE_CALIBRATE:  tft.print("CALIBRATE"); break;
+    case STATE_CALIBRATE:  tft.print(calMeasuring ? "CAL SWEEP" : "CALIBRATE"); break;
+    case STATE_CAL_DONE:   tft.print("CAL SUMMARY"); break;
     case STATE_SCANNING:   tft.print("SCANNING..."); break;
-    case STATE_DISPLAYING: tft.print(calActive ? "CAL RESULT" : "PRESS START"); break;
+    case STATE_DISPLAYING: tft.print("PRESS START"); break;
   }
 
   // Calibration screens take over the page body.
   if (currentState == STATE_CALIBRATE) {
-    drawCalPrompt();
+    if (calMeasuring) {
+      drawCalProgress();
+    } else {
+      drawCalPrompt();
+    }
     return;
   }
-  if (calActive && currentState == STATE_DISPLAYING) {
-    drawCalResult();
+  if (currentState == STATE_CAL_DONE) {
+    drawCalDone();
     return;
   }
 
@@ -665,10 +878,8 @@ void updateDisplay() {
   }
 }
 
-// Calibration prompt: tells the user which reference to connect and how.
+// Calibration prompt: which reference to connect and what to do.
 void drawCalPrompt() {
-  const CalRef& ref = CAL_REFS[calRefIndex];
-
   tft.fillRect(0, 26, 320, 240 - 26, ILI9341_BLACK);
   tft.setTextSize(2);
   tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
@@ -676,51 +887,79 @@ void drawCalPrompt() {
   tft.print("CALIBRATE");
   tft.setTextSize(1);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-  tft.setCursor(20, 80);
-  tft.print("Reference: ");
+  tft.setCursor(20, 84);
+  tft.print("Step ");
+  tft.print((int)calPhase + 1);
+  tft.print("/");
+  tft.print(NUM_CAL_PHASES);
+  tft.setCursor(20, 104);
   tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
-  tft.print(ref.name);
+  tft.print(calPhasePrompt());
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-  tft.setCursor(20, 110);
-  tft.print("Connect load, press START");
-  tft.setCursor(20, 140);
-  tft.print("[BAND] change  [START] run");
-  tft.setCursor(20, 160);
+  tft.setCursor(20, 128);
+  tft.print("Press START to sweep all bands");
+  tft.setCursor(20, 150);
   tft.print("[MODE] cancel");
 }
 
-// Calibration result: PASS/FAIL, R/X/SWR and deviation from the reference.
-void drawCalResult() {
-  const CalRef& ref = CAL_REFS[calRefIndex];
+// Calibration progress: phase, current band, point, and a progress bar.
+void drawCalProgress() {
+  const Band& b = BANDS[calBandIndex];
 
   tft.fillRect(0, 26, 320, 240 - 26, ILI9341_BLACK);
+  tft.setTextSize(1);
+  tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
+  tft.setCursor(20, 40);
+  tft.print("Calibrating...");
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(20, 64);
+  tft.print("Ref: ");
+  tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
+  tft.print(calPhasePrompt());
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(20, 90);
+  tft.print("Band ");
+  tft.print((int)calBandIndex + 1);
+  tft.print("/");
+  tft.print(NUM_BANDS);
+  tft.print("  ");
+  tft.print(b.name);
+  tft.setCursor(20, 114);
+  tft.print("Point ");
+  tft.print((int)calPoint + 1);
+  tft.print("/");
+  tft.print(CAL_PTS_PER_BAND);
 
+  // Overall progress bar (bands done + current band fraction).
+  int totalPts = NUM_BANDS * CAL_PTS_PER_BAND;
+  int done = calBandIndex * CAL_PTS_PER_BAND + calPoint;
+  int bw = 240;
+  int bx = 20, by = 150;
+  int fill = (int)((float)done / totalPts * bw);
+  if (fill > bw) fill = bw;
+  tft.drawRect(bx, by, bw, 12, ILI9341_WHITE);
+  tft.fillRect(bx + 1, by + 1, fill - 1, 10, ILI9341_GREEN);
+  tft.setCursor(20, 170);
+  tft.print((done * 100) / totalPts);
+  tft.print(" %  [MODE] cancel");
+}
+
+// Calibration wizard summary (all phases done).
+void drawCalDone() {
+  tft.fillRect(0, 0, 320, 240, ILI9341_BLACK);
   tft.setTextSize(2);
-  if (!calResult.valid) {
-    tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
-    tft.setCursor(20, 40);
-    tft.print("NO READING");
-  } else {
-    tft.setTextColor(calResult.pass ? ILI9341_GREEN : ILI9341_RED, ILI9341_BLACK);
-    tft.setCursor(20, 40);
-    tft.print(calResult.pass ? "PASS" : "FAIL");
-  }
-
+  tft.setTextColor(calPassed ? ILI9341_GREEN : ILI9341_RED, ILI9341_BLACK);
+  tft.setCursor(20, 40);
+  tft.print(calPassed ? "CAL DONE" : "CAL FAILED");
   tft.setTextSize(1);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-  tft.setCursor(20, 80);
-  tft.print("Ref: "); tft.print(ref.name);
-  tft.setCursor(20, 104);
-  tft.print("R="); tft.print(calResult.r, 1);
-  tft.print("  X="); tft.print(calResult.x, 1);
-  tft.setCursor(20, 124);
-  tft.print("SWR="); tft.print(calResult.swr, 2);
-  if (!(ref.isOpen || ref.isShort)) {
-    tft.setCursor(20, 144);
-    tft.print("Dev "); tft.print(calResult.devPct, 1); tft.print(" %");
-  }
-  tft.setCursor(20, 176);
-  tft.print("[START] exit  [BAND] new");
+  tft.setCursor(20, 90);
+  tft.print("Failures: ");
+  tft.print((int)calFailCount);
+  tft.setCursor(20, 110);
+  tft.print(calValid ? "Correction saved" : "Correction NOT saved");
+  tft.setCursor(20, 160);
+  tft.print("Press any button to exit");
 }
 
 // Scales scanPoints[] into the plot area and draws the SWR curve.

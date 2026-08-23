@@ -103,8 +103,10 @@ See [`docs/AA-30_ZERO_data_exchange_protocol.md`](docs/AA-30_ZERO_data_exchange_
 - **`src/main.cpp`** — serial bridge + state machine. Parses and validates the
   `freq,R,X` stream, computes SWR, stores valid points in `scanPoints[]`, then renders them
   to the ILI9341 display (SWR curve or numeric readout) and reads the four buttons.
-  Includes a **CALIBRATE** mode: press CAL, pick a reference (50/25/75/100 Ω, open, short)
-  with BAND, run with START, and get a PASS/FAIL + % deviation check of the analyzer.
+  Includes a **CALIBRATE** wizard: press CAL, then walk through three guided phases
+  (50 Ω reference, short, open) that sweep every HF band × 20 points, store a per-band
+  R/X offset table to EEPROM, and apply the correction to all normal sweeps. Progress
+  (band + point + bar) is shown during calibration.
   Built with **PlatformIO** + Arduino framework (requires **Adafruit_GFX** and
   **Adafruit_ILI9341**, declared automatically in `platformio.ini`).
 - **`python/`** — `sweep_bands.py` (drive the analyzer + record results) and
@@ -166,7 +168,7 @@ USB CDC console: 115200 baud. AA-30 UART: 38400 baud (`Serial1`).
 
 1. Verify the ILI9341 rendering + four-button workflow on real hardware.
 2. Tighten the state machine (**IDLE → CALIBRATE → SELECT_BAND → SCANNING → DISPLAYING**).
-3. ✅ **Calibration implemented** — CAL runs a reference-based performance check (50/25/75/100 Ω, open, short) with PASS/FAIL + % deviation.
+3. ✅ **Calibration implemented** — guided wizard (50 Ω / short / open), all bands × 20 points, R/X offset table stored to EEPROM and applied to every sweep.
 4. Add touch / rotary control or a menu system for band and mode selection.
 
 ## License
