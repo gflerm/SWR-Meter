@@ -95,22 +95,24 @@ The state machine in `src/main.cpp` enforces this critical sequence:
 
 ## 💾 Software Implementation
 Built with **PlatformIO** + Arduino framework, board `uno_r4_minima` (config: [`platformio.ini`](platformio.ini)).
-*   **Bridge Functionality:** `src/main.cpp` manages the two serial lines (PC `Serial` + analyzer `Serial1`), relays data, and handles the four button inputs (START D2, BAND D3, MODE D4, CAL D5).
-*   **Measurement Logic:** The system state machine orchestrates the command sequence and handles data parsing and SWR calculation based on the protocol.
-*   **Bogus-Reading Guard:** Incoming `freq,R,X` lines are validated before use — NaN/Inf, physically impossible magnitudes (`R`/`|X|` > 1 MΩ), and out-of-range SWR (`<1` or `>100`) are discarded. Valid points are stored in `scanPoints[]` with computed SWR.
+*   **Modular structure:** `src/main.cpp` is a thin orchestrator (`setup`/`loop`/state machine/PC commands). Handlers live in their own modules: `display.*` (ILI9341), `rigexpert.*` (AA-30 parser/scans), `calibration.*` (wizard/EEPROM), `telemetry.*` (`@`-telemetry), plus `config.h` (pins/types) and `hardware.h`/`.cpp` (shared global state + `tft` + `Serial1`).
+*   **Bridge Functionality:** manages the two serial lines (PC `Serial` + analyzer `Serial1`), relays data, and handles the four buttons (START D2, BAND D3, MODE D4, CAL D5).
+*   **Measurement Logic:** the state machine orchestrates the command sequence, parsing and SWR calculation based on the protocol.
+*   **Validation:** Incoming `freq,R,X` lines are parsed **syntactically** (finite, in-range) then gated for physical plausibility on normal sweeps (`R`/`|X|` sensible, SWR in `[1,100]`). NaN/Inf and absurd magnitudes are discarded. Valid points are stored in `scanPoints[]` with computed SWR.
 *   **Display/UI:** `scanPoints[]` are rendered to the ILI9341 as either an SWR-vs-frequency curve (green/yellow/red by SWR threshold) or a large R/X/SWR numeric readout. Requires Adafruit_GFX + Adafruit_ILI9341 (declared via `lib_deps`).
+*   **External control:** a host app can take over with `!CTRL:EXTERNAL` (display bypassed for speed) and resume with `!CTRL:LOCAL`.
 
 ## ⚠️ Current Status
 ✅ **Uno R4 ⇄ AA-30.ZERO communication verified working** (using hardware `Serial1` @ 38400, analyzer on UART1). A 50 Ω dummy load reads correctly (R ≈ 50 Ω, X ≈ 0, SWR ≈ 1.0 across HF bands). Bogus-reading guard in place.
 ✅ **Full 160 m → 10 m sweep recorded** (IARU **Region 1**, 100 points/band) in [`result.md`](result.md) and [`result_data.json`](result_data.json); per-band and combined SWR graphs rendered to PDF in [`graphs/`](graphs).
 🖥️ **Display selected**: Waveshare 2.4" SPI LCD (ILI9341, 240x320, 65K colour), 3.3 V logic.
-🎛️ **Controls + UI implemented**: four buttons (START D2 / BAND D3 / MODE D4 / CAL D5) drive an ILI9341 SWR curve + numeric readout in `src/main.cpp`.
-✅ **Calibration implemented**: guided wizard (50 Ω / short / open references) that sweeps all bands × 20 points, builds a per-band R/X offset table, stores it to EEPROM, and applies the correction to every normal sweep. Progress (band/point/bar) shown during calibration.
-✅ **Builds cleanly with PlatformIO** (`renesas-ra` platform, `uno_r4_minima` board) — RAM 29.7%, Flash 25.2%.
+🎛️ **Controls + UI implemented**: four buttons (START D2 / BAND D3 / MODE D4 / CAL D5) drive an ILI9341 SWR curve + numeric readout.
+✅ **Calibration implemented**: single-phase guided wizard (50 Ω reference) that sweeps all bands × 20 points, builds a per-band R/X offset table, stores it to EEPROM, and applies the correction (with linear interpolation between table points) to every normal sweep. Progress (band/point/bar) shown during calibration.
+✅ **Modularized + robust**: split into focused modules; SHORT/OPEN verification phases removed (verification-only, no correction/EEPROM write); outlier-tolerant 90% band-vote; live-sweep watchdog fix; scan completes on trailing `OK`.
+✅ **Builds cleanly with PlatformIO** (`renesas-ra` platform, `uno_r4_minima` board) — RAM 40.3%, Flash 30.2%.
 
 ## 🚀 Next Steps
 1.  **Verify on hardware:** Confirm ILI9341 rendering + four-button workflow against a real display.
-2.  **State Machine & Workflow:** Finalize **IDLE $\rightarrow$ CALIBRATE $\rightarrow$ SELECT\_BAND $\rightarrow$ SCANNING $\rightarrow$ DISPLAYING**.
-3.  **Menu/Touch:** Optional rotary or touch control to extend band/mode selection.
-4.  **[DONE] Verification:** Full-band sweep verified against a 50 Ω reference load across all HF bands; results and graphs generated.
-5.  **[DONE] Calibration:** Guided wizard (50 Ω / short / open), all bands × 20 points, R/X offset table persisted to EEPROM and applied to sweeps.
+2.  **Menu/Touch:** Optional rotary or touch control to extend band/mode selection.
+3.  **[DONE] Verification:** Full-band sweep verified against a 50 Ω reference load across all HF bands; results and graphs generated.
+4.  **[DONE] Calibration:** Single-phase guided wizard (50 Ω), all bands × 20 points, R/X offset table persisted to EEPROM and applied (with interpolation) to sweeps.

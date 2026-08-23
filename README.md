@@ -100,15 +100,31 @@ See [`docs/AA-30_ZERO_data_exchange_protocol.md`](docs/AA-30_ZERO_data_exchange_
 
 ## 💾 Software
 
-- **`src/main.cpp`** — serial bridge + state machine. Parses and validates the
-  `freq,R,X` stream, computes SWR, stores valid points in `scanPoints[]`, then renders them
-  to the ILI9341 display (SWR curve or numeric readout) and reads the four buttons.
-  Includes a **CALIBRATE** wizard: press CAL, then walk through three guided phases
-  (50 Ω reference, short, open) that sweep every HF band × 20 points, store a per-band
-  R/X offset table to EEPROM, and apply the correction to all normal sweeps. Progress
-  (band + point + bar) is shown during calibration.
-  Built with **PlatformIO** + Arduino framework (requires **Adafruit_GFX** and
-  **Adafruit_ILI9341**, declared automatically in `platformio.ini`).
+The firmware is split into focused modules under `src/`, orchestrated by a thin
+`main.cpp`:
+
+| File | Responsibility |
+|------|----------------|
+| `main.cpp` | `setup()`, `loop()`, the UI state machine, PC-command handling |
+| `config.h` | Pin map, constants, shared types / tables |
+| `hardware.h`/`.cpp` | all global state + the `tft` object + the AA-30 `Serial1` |
+| `display.h`/`.cpp` | every ILI9341 render call + external-control splash |
+| `rigexpert.h`/`.cpp` | AA-30 UART poll, ASCII parser, validation, scan driver |
+| `calibration.h`/`.cpp` | calibration wizard, EEPROM table, correction |
+| `telemetry.h`/`.cpp` | `@STATE`/`@BAND`/`@MODE`/`@CTRL`/`@CAL*` emit helpers |
+
+The AA-30 `freq,R,X` stream is parsed (syntactically), validated for physical
+plausibility on normal sweeps, and rendered to the ILI9341 as an SWR curve or a
+numeric readout. A **CALIBRATE** wizard (press CAL) sweeps every HF band × 20
+points against a **50 Ω** reference, builds a per-band R/X offset table, stores
+it to EEPROM, and applies the correction (with linear interpolation between
+table points) to all normal sweeps. Progress (band + point + bar) is shown
+during calibration. A host app can take over via `!CTRL:EXTERNAL` (display is
+bypassed for speed) and return with `!CTRL:LOCAL`.
+
+Built with **PlatformIO** + Arduino framework (requires **Adafruit_GFX** and
+**Adafruit_ILI9341**, declared automatically in `platformio.ini`).
+
 - **`python/`** — `sweep_bands.py` (drive the analyzer + record results),
   `graph_results.py` (render PDF graphs with matplotlib), and
   `sim_display.py` (**Windows simulator GUI**: emulates the ILI9341 display and
@@ -182,16 +198,16 @@ python python/sim_display.py --mock            # offline demo (no serial)
 ```
 
 The firmware emits machine-readable telemetry (`@STATE:`, `@BAND:`, `@POINT:`,
-`@CAL*`) that the simulator uses to render each screen exactly, including the
-calibration progress (band + point + bar). Soft buttons send `!BTN:...`
-commands; non-command serial lines still pass through to the AA-30 in IDLE.
+`@CAL*`, `@CTRL:`) that the simulator uses to render each screen exactly,
+including the calibration progress (band + point + bar). Soft buttons send
+`!BTN:...` commands; `!CTRL:EXTERNAL`/`!CTRL:LOCAL` toggle host control; and
+non-command serial lines still pass through to the AA-30 in IDLE.
 
 ## 🚀 Next Steps
 
-1. Verify the ILI9341 rendering + four-button workflow on real hardware.
-2. Tighten the state machine (**IDLE → CALIBRATE → SELECT_BAND → SCANNING → DISPLAYING**).
-3. ✅ **Calibration implemented** — guided wizard (50 Ω / short / open), all bands × 20 points, R/X offset table stored to EEPROM and applied to every sweep.
-4. Add touch / rotary control or a menu system for band and mode selection.
+1. ✅ **Full stack wired on real hardware** — ILI9341 rendering + 4-button workflow verified.
+2. ✅ **Calibration implemented** — single-phase guided wizard (50 Ω reference), all bands × 20 points, R/X offset table stored to EEPROM and applied (with linear interpolation) to every sweep.
+3. Add touch / rotary control or a menu system for band and mode selection.
 
 ## License
 

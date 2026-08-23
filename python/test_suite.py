@@ -190,13 +190,19 @@ def pause(t=SETTLE):
 
 
 def to_idle(fw):
-    for _ in range(8):
+    for _ in range(12):
         st = fw.state()
         if "@STATE:IDLE" in st:
             pause()
             return True
-        fw.write_line("!BTN:MODE")
-        pause(0.3)
+        # A completed scan leaves the unit in DISPLAYING, and CAL_DONE shows
+        # the summary; both exit via START. Every other non-idle state is
+        # cancelled with MODE. Poll fresh state each pass.
+        if "@STATE:DISPLAYING" in st or "@STATE:CAL_DONE" in st:
+            fw.write_line("!BTN:START")
+        else:
+            fw.write_line("!BTN:MODE")
+        pause(0.4)
     return False
 
 
@@ -283,8 +289,8 @@ def t_calibration(fw):
     if "@STATE:CALIBRATE" not in s:
         return Result("G5", False, "not in CALIBRATE: " + s.strip()[:60])
     return Result("G5", True,
-                  "entered CALIBRATE and sweeps the 50-ohm phase via START; "
-                  "SHORT/OPEN correctness = MANUAL (see procedure)")
+                  "entered CALIBRATE and swept the single 50-ohm phase via START "
+                  "(see calibrate_guide.py for the hardware procedure)")
 
 
 def main():
@@ -342,9 +348,8 @@ MANUAL_CHECKLIST = """MANUAL (hardware) test checklist
 ============================
 G1  Welcome screen: power the board, confirm the ILI9341 shows the SWR METER
     welcome page + button instructions.
-G5  Calibration SHORT phase: on the wizard, connect a SHORT, press START,
-    confirm it sweeps all bands and reports PASS/FAIL.
-G5  Calibration OPEN phase: connect an OPEN, press START, confirm result.
+G5  Calibration: connect a 50 ohm load, run the wizard, confirm it sweeps all
+    bands and reports PASS (single-phase; the table is saved to EEPROM).
 G6  Reset: press the physical RESET button on the R4; confirm the welcome
     screen returns and the USB port re-enumerates (reopen the simulator).
 """

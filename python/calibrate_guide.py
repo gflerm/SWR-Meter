@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """Guided G5 calibration walkthrough for the AA-30.ZERO SWR meter.
 
-Drives the firmware's calibration wizard over USB-CDC and tells you exactly
-when to swap the calibration plug on the AA-30's RF connector:
+Drives the firmware's calibration wizard over USB-CDC. The wizard is
+single-phase: connect a 50 ohm load, and it sweeps every band to build and
+save the correction table.
 
-  Phase 1/3  -> connect a 50 ohm load            (run)
-  Phase 2/3  -> swap to a SHORT                   (run)
-  Phase 3/3  -> swap to an OPEN                   (run)
+  Phase 1/1  -> connect a 50 ohm load   (run)
 
-Press Enter at each prompt after changing/confirming the plug. The script keys
-off the firmware's @CALPHASE / @STATE / @CALPROG telemetry so timing is driven
-by the device, not a blind timer.
+Press Enter after confirming the plug. The script keys off the firmware's
+@CALPHASE / @STATE / @CALPROG / @CALBAND telemetry so timing is driven by the
+device, not a blind timer.
 
 It writes a structured result log:
   tests/calibration_result.json   (machine-readable)
@@ -32,7 +31,7 @@ STATE_RE = re.compile(r"@STATE:(\w+)")
 POINT_RE = re.compile(r"@POINT:([^\r\n]+)")
 
 BANDS = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"]
-PHASES = ["50 ohm", "SHORT", "OPEN"]
+PHASES = ["50 ohm"]
 
 
 class Firmware:
@@ -157,55 +156,56 @@ def main():
     print("Board: %s   (leave the AA-30 RF port plugged into the R4)" % port)
     print()
 
-    # Ensure IDLE, then enter calibration.
-    fw.write("!BTN:MODE"); time.sleep(0.6)
+    # Ensure IDLE, then enter calibration. A finished scan leaves DISPLAYING
+    # (exits via START); other non-idle states are cancelled with MODE.
+    for _ in range(12):
+        s = fw.state()
+        if "@STATE:IDLE" in s:
+            break
+        if "@STATE:DISPLAYING" in s or "@STATE:CAL_DONE" in s:
+            fw.write("!BTN:START")
+        else:
+            fw.write("!BTN:MODE")
+        time.sleep(0.5)
+    time.sleep(0.5)
     fw.write("!BTN:CAL"); time.sleep(0.8)
     s = fw.state()
     if "@STATE:CALIBRATE" not in s:
         print("ERROR: did not enter CALIBRATE. State: %s" % s.strip()[:80])
         fw.close()
         return 1
-    print("Entered calibration (phase 1/3).")
+    print("Entered calibration (phase 1/1, 50 ohm).")
     print()
 
     results = {"started": time.strftime("%Y-%m-%d %H:%M:%S"),
                "port": port, "phases": {}, "final_state": None, "verdict": None}
     last_got = []
 
-    for idx, phase in enumerate(PHASES, start=1):
-        nxt = idx + 1
-        if nxt <= 3:
-            advance = r"@CALPHASE:%d/3" % nxt
-        else:
-            advance = r"@STATE:CAL_DONE"
-        prompt = ("[PHASE %d/3 - %s] Connect %s on the RF connector, "
-                  "then press Enter to start..." % (idx, phase.upper(), phase))
-        input(prompt)
-        m, points, got = capture_phase(fw, phase, advance)
-        last_got = got
-        # Sample stats
-        stats = None
-        if points:
-            rs = [p[1] for p in points]
-            xs = [p[2] for p in points]
-            sws = [p[3] for p in points]
-            stats = {
-                "points": len(points),
-                "r_min": round(min(rs), 2), "r_max": round(max(rs), 2),
-                "r_avg": round(sum(rs) / len(rs), 2),
-                "x_avg": round(sum(xs) / len(xs), 2),
-                "swr_min": round(min(sws), 3), "swr_max": round(max(sws), 3),
-                "sample": points[0] if points else None,
-            }
-        # Did we advance (phase transition or wizard end)?
-        advanced = bool(m)
-        cal_done = "CAL_DONE" in got
-        results["phases"][phase] = {
-            "advanced": advanced, "cal_done_in_phase": cal_done, "stats": stats,
+    # Single-phase wizard: press Enter to run, wait for CAL_DONE.
+    input("[50 ohm] Connect a 50 ohm load on the RF connector, "
+          "then press Enter to start...")
+    m, points, got = capture_phase(fw, PHASES[0], r"@STATE:CAL_DONE")
+    last_got = got
+    stats = None
+    if points:
+        rs = [p[1] for p in points]
+        xs = [p[2] for p in points]
+        sws = [p[3] for p in points]
+        stats = {
+            "points": len(points),
+            "r_min": round(min(rs), 2), "r_max": round(max(rs), 2),
+            "r_avg": round(sum(rs) / len(rs), 2),
+            "x_avg": round(sum(xs) / len(xs), 2),
+            "swr_min": round(min(sws), 3), "swr_max": round(max(sws), 3),
+            "sample": points[0] if points else None,
         }
-        print("  %s: points=%s advanced=%s cal_done=%s" % (
-            phase, stats["points"] if stats else 0, advanced, cal_done))
-        print()
+    results["phases"][PHASES[0]] = {
+        "advanced": bool(m), "cal_done_in_phase": "CAL_DONE" in got,
+        "stats": stats,
+    }
+    print("  50 ohm: points=%s advanced=%s cal_done=%s" % (
+        stats["points"] if stats else 0, bool(m), "CAL_DONE" in got))
+    print()
 
     # Final state / verdict.
     s = fw.state()

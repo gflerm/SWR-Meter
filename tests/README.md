@@ -23,7 +23,7 @@ board on the port.
 | G2 | Band selection cycles 160m..10m | ✅ | |
 | G3 | Mode toggle curve/numeric | ✅ | |
 | G4 | Scan produces data (fw scan agrees with passthrough) | ✅ | |
-| G5 | Calibration wizard (50 ohm phase) | ⚠️ | short/open loads |
+| G5 | Calibration wizard (50 ohm phase, single-phase) | ⚠️ | connect a 50 Ω load |
 | G6 | Reset returns to welcome | | ✅ physical button |
 
 ## How it stays deterministic
@@ -47,5 +47,6 @@ Each run appends to `tests/test_log.md`.
 
 - G6 — press the physical RESET button; confirm the welcome screen returns and
   the USB port re-enumerates.
-- G5 — attach a SHORT/OPEN load at the wizard prompt and confirm PASS/FAIL.
+- G5 — attach a 50 Ω load at the wizard prompt and confirm it sweeps all bands
+  and reports PASS (the table is saved to EEPROM).
 - G1 — confirm the physical ILI9341 shows the welcome page.

@@ -27,9 +27,9 @@ are called out explicitly rather than faked by automation.
 > **What is IN scope for this release/iteration? What is explicitly OUT?**
 >
 > - In: [example] boot, band select, mode toggle, band sweep, calibration
->   wizard (50 ohm), PC simulator.
-> - Out: [example] calibration *correction correctness* under short/open loads
->   (manual), touchscreen, RF measurements above 170 MHz.
+>   wizard (single-phase, 50 ohm reference), PC simulator.
+> - Out: [example] calibration *correction correctness* under a real antenna
+>   load, touchscreen, RF measurements above 170 MHz.
 
 ## 3. Requirements / acceptance criteria (goal by goal)
 
@@ -42,7 +42,7 @@ are called out explicitly rather than faked by automation.
 | G2 | [band selection] | [BAND cycles 160m..10m; @BAND: updates each press] | ✅ | |
 | G3 | [mode toggle] | [MODE flips curve/numeric; @MODE: changes] | ✅ | |
 | G4 | [scan produces data] | [full sweep; N points + terminal OK; values plausible + agree with reference path] | ✅ | |
-| G5 | [calibration wizard] | [sequence runs 50/short/open; reports DONE/FAILED] | ⚠️ partial | swap loads |
+| G5 | [calibration wizard] | [single-phase 50-ohm run; reports DONE/FAILED & saves table] | ⚠️ partial | attach 50 Ω load |
 | G6 | [reset → welcome] | [physical reset restores welcome; port re-enumerates] | | ✅ |
 
 ## 4. Architecture
@@ -93,7 +93,7 @@ are called out explicitly rather than faked by automation.
 
 ### Manual checklist (cannot be automated)
 - [G6] press the physical RESET; confirm welcome returns + port re-enumerates.
-- [G5] attach SHORT, run wizard, confirm PASS/FAIL; attach OPEN, repeat.
+- [G5] attach a 50 Ω load, run the wizard, confirm PASS and that the table is saved to EEPROM.
 - [G1/👁] confirm the physical LCD shows the welcome page (host can't see it).
 
 ## 7. Results & verification record
@@ -106,7 +106,7 @@ are called out explicitly rather than faked by automation.
 | G2 | | | |
 | G3 | | | |
 | G4 | | | |
-| G5 | | | partial — short/open manual |
+| G5 | | | partial — needs a 50 Ω load |
 | G6 | | | manual |
 
 ## 8. Rollback & versioning
@@ -143,8 +143,8 @@ are called out explicitly rather than faked by automation.
    proving both the firmware state machine **and** the analyzer plumbing.
 
 6. **State what needs a human before automating.** Reset (physical button) and
-   swapping short/open calibration loads can't be scripted. Marking them
-   "manual" in the procedure is honest and avoids a fake green.
+   attaching a calibration load can't be scripted. Marking them "manual" in
+   the procedure is honest and avoids a fake green.
 
 7. **Separate "compile-clean" from "works".** A sketch can build fine yet print
    blank telemetry (here: `%f` with newlib-nano lacking float-printf). Test the
