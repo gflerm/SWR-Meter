@@ -264,6 +264,9 @@ void showStatus(const char* msg, uint32_t ms);
 // SETUP / LOOP
 // ======================================================================
 
+/**
+ * @brief One-time initialisation: pins, UARTs, EEPROM, display and boot page.
+ */
 void setup() {
   pinMode(START_PIN, INPUT_PULLUP);
   pinMode(BAND_PIN,  INPUT_PULLUP);
@@ -284,6 +287,10 @@ void setup() {
   emitState("WELCOME");
 }
 
+/**
+ * @brief One Arduino main loop iteration: read buttons, step the state
+ *        machine, and drain the analyzer UART.
+ */
 void loop() {
   static uint32_t lastDebounce = 0;
   uint32_t now = millis();
@@ -328,34 +335,67 @@ void loop() {
 // PC TELEMETRY + COMMANDS
 // ======================================================================
 
-// Machine-readable state line for the simulator (starts with '@').
+/**
+ * @brief Emit the current state machine state as machine-readable telemetry.
+ *
+ * The simulator (python/sim_display.py) parses this to redraw the display.
+ * Prints a line of the form `@STATE:<name>`.
+ * @param state  Null-terminated state string (e.g. "IDLE", "SCANNING").
+ */
 void emitState(const char* state) {
   Serial.print("@STATE:");
   Serial.println(state);
 }
 
-// Returns true if a scan/calibration sweep has received no data for too long.
+/**
+ * @brief Detect a hung scan/calibration sweep (silent analyzer).
+ *
+ * A sweep is considered stuck if it is still collecting but has received no
+ * data for longer than SCAN_TIMEOUT_MS, so the UI can return to IDLE.
+ * @param now  Current millis() value.
+ * @return true if the current sweep should be aborted, false otherwise.
+ */
 bool isSweepStuck(uint32_t now) {
   if (!collecting) return false;
   return (now - sweepStart) > SCAN_TIMEOUT_MS;
 }
 
-// Shows a transient message on screen for `ms` milliseconds.
+/**
+ * @brief Show a transient on-screen status message.
+ *
+ * @param msg  String to display (kept as a pointer; must stay valid).
+ * @param ms   How long the message is shown, in milliseconds.
+ */
 void showStatus(const char* msg, uint32_t ms) {
   statusMsg = msg;
   statusMsgUntil = millis() + ms;
 }
 
+/**
+ * @brief Emit the currently selected band as telemetry.
+ *
+ * Prints `@BAND:<name>` so the simulator can update the header bar.
+ */
 void emitBand() {
   Serial.print("@BAND:");
   Serial.println(BANDS[bandIndex].name);
 }
 
+/**
+ * @brief Emit the current display layout as telemetry.
+ *
+ * Prints `@MODE:curve` or `@MODE:numeric`.
+ */
 void emitMode() {
   Serial.print("@MODE:");
   Serial.println(displayMode == MODE_CURVE ? "curve" : "numeric");
 }
 
+/**
+ * @brief Emit the calibration wizard progress line.
+ *
+ * Prints `@CALPHASE:<n>/<total>` giving the current reference step.
+ */
 void emitCalPhase() {
   Serial.print("@CALPHASE:");
   Serial.print((int)calPhase + 1);
@@ -363,6 +403,12 @@ void emitCalPhase() {
   Serial.println(NUM_CAL_PHASES);
 }
 
+/**
+ * @brief Emit the calibration band/point progress as telemetry.
+ *
+ * Prints `@CALPROG:band=<b>/<N>,pt=<p>/<P>` so the simulator can draw the
+ * per-band / per-point progress bar.
+ */
 void emitCalProgress() {
   Serial.print("@CALPROG:band=");
   Serial.print((int)calBandIndex + 1);
@@ -374,8 +420,19 @@ void emitCalProgress() {
   Serial.println(CAL_PTS_PER_BAND);
 }
 
-// Reads PC serial: lines starting with '!' are soft-button commands; anything
-// else is passed through to the AA-30 while in IDLE. Sets the button flags.
+/**
+ * @brief Process PC serial bytes (soft buttons + analyzer passthrough).
+ *
+ * Reads all pending USB-CDC bytes. Complete lines starting with `!` are
+ * treated as soft-button / query commands and set the matching button flag
+ * (preventing them from being forwarded). Any other line, while in IDLE, is
+ * forwarded verbatim to the AA-30 (Serial1) for direct control.
+ *
+ * @param s  Set true if `!BTN:START` received.
+ * @param b  Set true if `!BTN:BAND`  received.
+ * @param m  Set true if `!BTN:MODE`  received.
+ * @param c  Set true if `!BTN:CAL`   received.
+ */
 void handlePcCommands(bool& s, bool& b, bool& m, bool& c) {
   while (Serial.available()) {
     char ch = (char)Serial.read();
@@ -414,6 +471,18 @@ void handlePcCommands(bool& s, bool& b, bool& m, bool& c) {
 // STATE MACHINE
 // ======================================================================
 
+/**
+ * @brief Dispatch the main UI state machine.
+ *
+ * Runs one step of the finite state machine each loop based on the button
+ * flags. States: WELCOME, IDLE, CALIBRATE, SCANNING, DISPLAYING, CAL_DONE.
+ * Reads the band/display-mode/scan/calibrate actions for each state.
+ *
+ * @param startPressed  True if START was pressed this cycle.
+ * @param bandPressed   True if BAND  was pressed this cycle.
+ * @param modePressed   True if MODE  was pressed this cycle.
+ * @param calPressed    True if CAL   was pressed this cycle.
+ */
 void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, bool calPressed) {
   switch (currentState) {
     case STATE_WELCOME:
@@ -504,6 +573,13 @@ void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, b
 // SCAN DRIVER
 // ======================================================================
 
+/**
+ * @brief Command the AA-30 to sweep the currently selected band.
+ *
+ * Enters STATE_SCANNING, resets the point buffer, then powers the RF board
+ * (`ON`) and issues `fq`/`sw`/`frx` for the selected band. The streamed
+ * points are collected asynchronously by pollAnalyzer() -> processLine().
+ */
 void startScan() {
   scanCount   = 0;
   collecting  = true;
@@ -525,8 +601,15 @@ void startScan() {
   Serial.print(span);
   Serial.println(" Hz");
 
+  // Power the RF board first; without ON the AA-30 returns no measurement data.
+  // The analyzer needs a short gap between commands (esp. before frx) or it
+  // drops the sweep request when the setup commands arrive back-to-back.
+  AA_PORT.println("ON");
+  delay(150);
   AA_PORT.print("fq"); AA_PORT.println(center);
+  delay(50);
   AA_PORT.print("sw"); AA_PORT.println(span);
+  delay(50);
   AA_PORT.print("frx"); AA_PORT.println(POINTS_PER_SCAN - 1);
 }
 
@@ -534,7 +617,12 @@ void startScan() {
 // CALIBRATION / PERFORMANCE CHECK
 // ======================================================================
 
-// What the current phase expects the user to connect.
+/**
+ * @brief Text describing what the user must connect for the current phase.
+ *
+ * @return Pointer to a static string for the current calPhase: a 50 ohm load,
+ *         a short, or an open.
+ */
 const char* calPhasePrompt() {
   switch (calPhase) {
     case CAL_PHASE_50:    return "Connect 50 ohm load";
@@ -543,7 +631,13 @@ const char* calPhasePrompt() {
   }
 }
 
-// Enters the calibration wizard (first phase: 50 ohm reference).
+/**
+ * @brief Enter the calibration wizard.
+ *
+ * Initialises the wizard to its first phase (50 ohm reference), resets all
+ * calibration counters, and transitions to STATE_CALIBRATE. The user then
+ * presses START to begin sweeping, MODE to cancel.
+ */
 void startCalibrate() {
   calActive    = true;
   calMeasuring = false;
@@ -562,8 +656,12 @@ void startCalibrate() {
   Serial.println("Press START to begin, MODE to exit.");
 }
 
-// Begins sweeping the current band against the current reference. Each band
-// is swept with CAL_PTS_PER_BAND points via fq + sw + frx(N-1).
+/**
+ * @brief Begin sweeping the current band against the current reference.
+ *
+ * Sends `ON`, `fq`, `sw` and `frx(CAL_PTS_PER_BAND-1)` for the band at
+ * calBandIndex. Points are collected asynchronously by calHandlePoint().
+ */
 void calBeginBandSweep() {
   const Band& b = BANDS[calBandIndex];
   uint32_t center = (b.low + b.high) / 2;
@@ -584,12 +682,23 @@ void calBeginBandSweep() {
   Serial.print(") ref=");
   Serial.println(calPhasePrompt());
 
+  // Power the RF board first; without ON the AA-30 returns no measurement data.
+  AA_PORT.println("ON");
+  delay(50);
   AA_PORT.print("fq"); AA_PORT.println(center);
   AA_PORT.print("sw"); AA_PORT.println(span);
   AA_PORT.print("frx"); AA_PORT.println(CAL_PTS_PER_BAND - 1);
 }
 
-// Handles one parsed measurement arriving during a calibration band sweep.
+/**
+ * @brief Store one measurement point from a calibration band sweep.
+ *
+ * For the 50 ohm phase, stores the additive correction (50 - R, 0 - X). For
+ * the short/open phases, stores the raw R/X for verification. Advances the
+ * per-band point counter and emits progress telemetry.
+ *
+ * @param m  The parsed, validated measurement point.
+ */
 void calHandlePoint(const Measurement& m) {
   if (!m.valid) return;
 
@@ -610,7 +719,13 @@ void calHandlePoint(const Measurement& m) {
   emitCalProgress();
 }
 
-// Called once a band sweep's points have been collected.
+/**
+ * @brief Finalise the current band sweep and advance to the next.
+ *
+ * Marks the band valid (50 ohm phase), evaluates pass/fail for the short/open
+ * phases, then either sweeps the next band or completes the phase when all
+ * bands are done.
+ */
 void calFinishBand() {
   CalBand& cb = calTable[calBandIndex];
 
@@ -656,7 +771,13 @@ void calFinishBand() {
   }
 }
 
-// Advances to the next wizard phase, or finishes the wizard.
+/**
+ * @brief Advance to the next calibration phase, or finish the wizard.
+ *
+ * After the 50 ohm phase, persists the correction table and moves to the
+ * short-verification phase. After short, moves to open. After open, sets the
+ * overall pass/fail result and enters STATE_CAL_DONE.
+ */
 void calFinishPhase() {
   calMeasuring = false;
   collecting   = false;
@@ -695,6 +816,12 @@ void calFinishPhase() {
 
 // ---- EEPROM persistence ----------------------------------------------
 
+/**
+ * @brief Persist the calibration table to EEPROM.
+ *
+ * Writes a 4-byte magic marker followed by, for each band, a validity byte and
+ * CAL_PTS_PER_BAND entries of (freqMHz, rCorr, xCorr) floats.
+ */
 void saveCalibration() {
   int addr = CAL_EEPROM_ADDR;
   EEPROM.write(addr++, (CAL_EEPROM_MAGIC >> 24) & 0xFF);
@@ -715,6 +842,13 @@ void saveCalibration() {
   Serial.println("Calibration table saved to EEPROM.");
 }
 
+/**
+ * @brief Load the calibration table from EEPROM.
+ *
+ * Validates the 4-byte magic marker. If present, reads each band's validity
+ * byte and CAL_PTS_PER_BAND correction entries, and sets calValid if any band
+ * is valid. Silently marks calValid=false on a fresh/empty EEPROM.
+ */
 void loadCalibration() {
   int addr = CAL_EEPROM_ADDR;
   uint32_t magic = 0;
@@ -744,7 +878,15 @@ void loadCalibration() {
   Serial.println(calValid ? "Calibration loaded from EEPROM." : "Calibration table empty.");
 }
 
-// Applies the nearest stored correction to a measurement (normal sweeps).
+/**
+ * @brief Apply the stored calibration correction to a measurement.
+ *
+ * Finds the band containing m.freqMHz, looks up the nearest stored correction
+ * point, adds the R/X offsets, and recomputes SWR. No-op if no valid
+ * calibration exists or the measurement is already invalid.
+ *
+ * @param m  The measurement to correct (modified in place).
+ */
 void applyCalibration(Measurement& m) {
   if (!calValid || !m.valid) return;
 
@@ -775,6 +917,14 @@ void applyCalibration(Measurement& m) {
 // DATA PARSING & VALIDATION
 // ======================================================================
 
+/**
+ * @brief Reject physically impossible R/X readings.
+ *
+ * @param r  Series resistance (ohm).
+ * @param x  Series reactance (ohm).
+ * @return false for NaN/Inf, non-positive/mega-ohm resistance, or |X| too
+ *         large; otherwise true.
+ */
 bool isValidReading(float r, float x) {
   if (!isfinite(r) || !isfinite(x)) return false;
   if (r <= 0.0f || r > MAX_RESISTANCE) return false;
@@ -782,6 +932,14 @@ bool isValidReading(float r, float x) {
   return true;
 }
 
+/**
+ * @brief Compute SWR from series R and X in a Z0 system.
+ *
+ * @param r  Series resistance (ohm).
+ * @param x  Series reactance (ohm).
+ * @return The standing wave ratio, or MAX_SWR+1 for the degenerate cases
+ *         where the reflection coefficient magnitude approaches 1.
+ */
 float computeSWR(float r, float x) {
   float num = sqrtf((r - Z0) * (r - Z0) + x * x);
   float den = sqrtf((r + Z0) * (r + Z0) + x * x);
@@ -792,7 +950,14 @@ float computeSWR(float r, float x) {
   return (1.0f + gamma) / d;
 }
 
-// Parses "freqMHz,R,X" in place. Returns true and fills m if plausible.
+/**
+ * @brief Parse a "freqMHz,R,X" CSV line into a Measurement.
+ *
+ * @param line  Null-terminated line; modified in place (commas replaced by
+ *              NUL terminators).
+ * @param m     Output measurement (filled on success).
+ * @return true if the line parsed and passed basic validation, else false.
+ */
 bool parseFRXLine(char* line, Measurement& m) {
   char* p1 = strchr(line, ',');
   if (!p1) return false;
@@ -814,6 +979,11 @@ bool parseFRXLine(char* line, Measurement& m) {
   return m.valid;
 }
 
+/**
+ * @brief Append a measurement to the scan buffer if space remains.
+ *
+ * @param m  Measurement to store.
+ */
 void storePoint(const Measurement& m) {
   if (scanCount < MAX_POINTS) {
     scanPoints[scanCount++] = m;
@@ -824,6 +994,12 @@ void storePoint(const Measurement& m) {
 // ANALYZER POLLING (line assembly + parse + print)
 // ======================================================================
 
+/**
+ * @brief Drain the AA-30 UART, assembling bytes into lines.
+ *
+ * Reads all pending Serial1 bytes, terminates each newline-terminated line,
+ * and hands it to processLine(). CR bytes are discarded.
+ */
 void pollAnalyzer() {
   while (AA_PORT.available()) {
     char c = AA_PORT.read();
@@ -842,6 +1018,18 @@ void pollAnalyzer() {
   }
 }
 
+/**
+ * @brief Dispatch one assembled AA-30 line.
+ *
+ * Trims whitespace, then:
+ *  - A valid `freq,R,X` point  -> routes to calibration or stores the point,
+ *    completes the scan when POINTS_PER_SCAN is reached, and emits telemetry.
+ *  - `OK`                      -> completes a scan if points were collected.
+ *  - Other non-data text       -> echoed as an AA-30 message.
+ *  - Data-shaped but invalid   -> reported as a bogus/discarded line.
+ *
+ * @param line  Null-terminated line to process (modified in place).
+ */
 void processLine(char* line) {
   // Trim leading/trailing whitespace.
   char* s = line;
@@ -873,14 +1061,22 @@ void processLine(char* line) {
       }
     }
     // Telemetry to PC (6 decimals for MHz preserves narrow-band resolution).
-    char buf[64];
-    snprintf(buf, sizeof(buf), "F=%.6fMHz R=%.1f X=%.1f SWR=%.2f",
-             m.freqMHz, m.r, m.x, m.swr);
-    Serial.println(buf);
+    // Use dtostrf, not snprintf(%f): %f is a no-op when newlib-nano is linked
+    // without the float printf object, producing blank output.
+    char fs[16], rs[16], xs[16], ss[16];
+    dtostrf(m.freqMHz, 0, 6, fs);
+    dtostrf(m.r,       0, 1, rs);
+    dtostrf(m.x,       0, 1, xs);
+    dtostrf(m.swr,     0, 2, ss);
+    Serial.print("F="); Serial.print(fs); Serial.print("MHz R=");
+    Serial.print(rs);  Serial.print(" X="); Serial.print(xs);
+    Serial.print(" SWR="); Serial.println(ss);
     // Machine-readable point for the simulator.
-    snprintf(buf, sizeof(buf), "@POINT:%.6f,%.2f,%.2f,%.2f",
-             m.freqMHz, m.r, m.x, m.swr);
-    Serial.println(buf);
+    Serial.print("@POINT:");
+    Serial.print(fs); Serial.print(",");
+    Serial.print(rs); Serial.print(",");
+    Serial.print(xs); Serial.print(",");
+    Serial.println(ss);
     if (currentState == STATE_DISPLAYING) {
       emitState("DISPLAYING");
       emitBand();
@@ -911,7 +1107,12 @@ void processLine(char* line) {
 // DISPLAY
 // ======================================================================
 
-// Full-screen welcome + button instructions shown on boot (STATE_WELCOME).
+/**
+ * @brief Draw the boot welcome / button-instruction screen.
+ *
+ * Full-screen page (STATE_WELCOME): title bar plus a colour-coded list of the
+ * four buttons and what each does, and a "press any button" hint.
+ */
 void displayWelcome() {
   tft.fillScreen(ILI9341_BLACK);
 
@@ -967,13 +1168,23 @@ void displayWelcome() {
   Serial.println("==========================================================");
 }
 
-// Re-draws the welcome screen from the state machine (kept separate so the
-// boot-time call in setup() and the state-machine path share the same page).
+/**
+ * @brief Re-draw the welcome screen from the state machine.
+ *
+ * Kept separate from displayWelcome() so the boot-time call in setup() and the
+ * STATE_WELCOME state-machine path share the same page.
+ */
 void drawWelcome() {
   displayWelcome();
 }
 
-// Draws the page chrome + either a curve or numeric readout from scanPoints[].
+/**
+ * @brief Render the current page chrome and content.
+ *
+ * Draws the blue header (band + state), then delegates to the calibration
+ * screens, the idle prompt, or the curve/numeric readout depending on the
+ * current state and display mode.
+ */
 void updateDisplay() {
   const Band& b = BANDS[bandIndex];
 
@@ -1028,7 +1239,12 @@ void updateDisplay() {
   drawStatusOverlay();
 }
 
-// Draws a transient status message (e.g. "Aborted") for a short time.
+/**
+ * @brief Overlay a transient status message on the current screen.
+ *
+ * Draws statusMsg (e.g. "Aborted") for a short window. No-op once the message
+ * expires or none is set.
+ */
 void drawStatusOverlay() {
   if (statusMsg == NULL || millis() > statusMsgUntil) return;
   tft.setTextSize(2);
@@ -1041,7 +1257,9 @@ void drawStatusOverlay() {
   tft.print("Press any button...");
 }
 
-// Calibration prompt: which reference to connect and what to do.
+/**
+ * @brief Draw the calibration prompt (which reference to connect).
+ */
 void drawCalPrompt() {
   tft.fillRect(0, 26, 320, 240 - 26, ILI9341_BLACK);
   tft.setTextSize(2);
@@ -1065,7 +1283,9 @@ void drawCalPrompt() {
   tft.print("[MODE] cancel");
 }
 
-// Calibration progress: phase, current band, point, and a progress bar.
+/**
+ * @brief Draw the calibration progress (phase, band, point, progress bar).
+ */
 void drawCalProgress() {
   const Band& b = BANDS[calBandIndex];
 
@@ -1107,7 +1327,9 @@ void drawCalProgress() {
   tft.print(" %  [MODE] cancel");
 }
 
-// Calibration wizard summary (all phases done).
+/**
+ * @brief Draw the calibration wizard final summary (PASS/FAIL).
+ */
 void drawCalDone() {
   tft.fillRect(0, 0, 320, 240, ILI9341_BLACK);
   tft.setTextSize(2);
@@ -1125,7 +1347,14 @@ void drawCalDone() {
   tft.print("Press any button to exit");
 }
 
-// Scales scanPoints[] into the plot area and draws the SWR curve.
+/**
+ * @brief Scale scanPoints[] and draw the SWR-vs-frequency curve.
+ *
+ * Plots into a fixed 1.0–3.0 SWR window with a SWR=2.0 gridline, colours each
+ * segment green/yellow/red by SWR threshold, and prints the minimum SWR.
+ *
+ * @param b  The band being displayed (used for the x-axis range).
+ */
 void drawCurve(const Band& b) {
   const int x0 = 8, x1 = 312, y0 = 36, y1 = 224;
   const int plotW = x1 - x0;
@@ -1180,7 +1409,9 @@ void drawCurve(const Band& b) {
   tft.print(scanCount);
 }
 
-// Big single-value numeric readout (last valid measurement).
+/**
+ * @brief Draw a large single-value numeric readout of the last measurement.
+ */
 void drawNumeric() {
   const Measurement& m = scanPoints[scanCount - 1];
 

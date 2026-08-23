@@ -150,6 +150,7 @@ See the assembly photo above. Demo video: [AA-30.ZERO demo](media/aa30_zero_demo
 - [`AA-30_ZERO_data_exchange_protocol.md`](docs/AA-30_ZERO_data_exchange_protocol.md) — command protocol
 - [`AA-30_ZERO_getting_started.md`](docs/AA-30_ZERO_getting_started.md) — board overview & Arduino pairing
 - `docs/display_wiring.pdf` — display + button wiring reference (Waveshare 2.4" SPI / ILI9341)
+- [`docs/firmware_reference.md`](docs/firmware_reference.md) — firmware functions, state machine & serial protocol
 
 ## 🔨 Build / Upload
 
