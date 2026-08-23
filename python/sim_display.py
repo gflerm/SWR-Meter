@@ -643,11 +643,30 @@ class SimulatorApp:
         self._refresh_ports()
 
     def reset_target(self):
-        """Opt-in warm reset of the Uno R4 (1200 baud touch). The CDC port
-        disappears and re-enumerates; this waits and refreshes the port list."""
+        """Reset the firmware by sending !CMD:RESET (soft NVIC reboot). This
+        does NOT enter the DFU bootloader, so COM8 stays put. Only falls back
+        to the 1200-baud touch if the serial link is not open."""
+        if self.ser:
+            try:
+                self._log("Sending !CMD:RESET (soft reboot)...")
+                self.ser.write(b"!CMD:RESET\n")
+                self.ser.flush()
+                self.disconnect()
+                self._log("Waiting for the board to reboot (2 s)...")
+                time.sleep(2.0)
+                self._refresh_ports()
+                self.connect()
+                return
+            except Exception as exc:
+                self._log(f"Soft reset failed: {exc}")
+                # fall through to the 1200-baud touch
+        self._logic_reset_touch()
+
+    def _logic_reset_touch(self):
+        """Legacy reset via the 1200-baud touch (may drop COM8 on the R4)."""
         port = self.port_var.get()
         try:
-            self._log(f"Touching {port} at 1200 baud to reset the R4...")
+            self._log(f"Touching {port} at 1200 baud to reset...")
             temp = serial.Serial(port, 1200, timeout=0.5)
             temp.dtr = False
             time.sleep(0.1)
