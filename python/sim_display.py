@@ -563,17 +563,20 @@ class SimulatorApp:
         self.reset_btn.grid(row=0, column=5, padx=4)
         ttk.Button(top, text="Refresh", command=self._refresh_ports).grid(
             row=0, column=6, padx=4)
+        ttk.Label(top, text="Reset = press the R4 RESET button",
+                  foreground="#666").grid(row=1, column=0, columnspan=7,
+                                          sticky="w", padx=2)
 
         # Display canvas (scaled)
         self.display_img = None
         self.canvas = tk.Canvas(top, width=W * self.SCALE, height=H * self.SCALE,
                                 bg="black", highlightthickness=1,
                                 highlightbackground="#444")
-        self.canvas.grid(row=1, column=0, columnspan=6, pady=6)
+        self.canvas.grid(row=2, column=0, columnspan=7, pady=6)
 
         # Soft buttons
         btns = ttk.Frame(top)
-        btns.grid(row=2, column=0, columnspan=6, pady=4)
+        btns.grid(row=3, column=0, columnspan=7, pady=4)
         for label, cmd in [
             ("[ BAND ]", "!BTN:BAND"),
             ("[ START ]", "!BTN:START"),
@@ -586,7 +589,7 @@ class SimulatorApp:
 
         # Log
         logframe = ttk.LabelFrame(top, text="Serial log", padding=4)
-        logframe.grid(row=3, column=0, columnspan=6, sticky="nsew", pady=6)
+        logframe.grid(row=4, column=0, columnspan=7, sticky="nsew", pady=6)
 
         logwrap = ttk.Frame(logframe)
         logwrap.pack(side="left", fill="both", expand=True)
@@ -643,40 +646,50 @@ class SimulatorApp:
         self._refresh_ports()
 
     def reset_target(self):
-        """Reset the firmware by sending !CMD:RESET (soft NVIC reboot). This
-        does NOT enter the DFU bootloader, so COM8 stays put. Only falls back
-        to the 1200-baud touch if the serial link is not open."""
-        if self.ser:
-            try:
-                self._log("Sending !CMD:RESET (soft reboot)...")
-                self.ser.write(b"!CMD:RESET\n")
-                self.ser.flush()
-                self.disconnect()
-                self._log("Waiting for the board to reboot (2 s)...")
-                time.sleep(2.0)
-                self._refresh_ports()
-                self.connect()
-                return
-            except Exception as exc:
-                self._log(f"Soft reset failed: {exc}")
-                # fall through to the 1200-baud touch
-        self._logic_reset_touch()
+        """No software reset: the R4's native USB is unreliable to re-init from
+        the sketch, so the user presses the physical RESET button (or
+        power-cycles) to bring back the welcome screen. We just wait for the
+        port to reappear and reconnect."""
+        self._log("Press the RESET button on the R4 board (or power-cycle).")
+        self.disconnect()
+        self._wait_reconnect(self.port_var.get())
 
-    def _logic_reset_touch(self):
-        """Legacy reset via the 1200-baud touch (may drop COM8 on the R4)."""
-        port = self.port_var.get()
-        try:
-            self._log(f"Touching {port} at 1200 baud to reset...")
-            temp = serial.Serial(port, 1200, timeout=0.5)
-            temp.dtr = False
-            time.sleep(0.1)
-            temp.close()
-        except Exception as exc:
-            self._log(f"Reset touch failed: {exc}")
-            return
-        self._log("Waiting for the board to re-enumerate (2 s)...")
-        time.sleep(2.0)
+    def _wait_reconnect(self, wanted, timeout=12.0, poll=0.5):
+        """Wait up to `timeout` s for `wanted` to reappear, or adopt a new COM
+        device that shows up (the R4 may come back as a different number),
+        then open it. Returns True on success."""
+        from serial.tools import list_ports
+        baud = int(self.baud_var.get())
+        deadline = time.time() + timeout
+        self._log(f"Waiting for {wanted} to reappear...")
+        seen = set()
+        while time.time() < deadline:
+            ports = [p.device for p in list_ports.comports()]
+            # Prefer the original port; else adopt any non-COM1 new device.
+            target = wanted if wanted in ports else None
+            if target is None:
+                for p in ports:
+                    if p != "COM1" and p != wanted and p not in seen:
+                        target = p
+                        break
+            if target:
+                try:
+                    self.ser = serial.Serial(target, baud, timeout=0.05,
+                                             write_timeout=0.1)
+                    self.connect_btn.configure(text="Disconnect")
+                    self._log(f"Reconnected to {target} @ {baud}")
+                    self.port_var.set(target)
+                    self.send("!GET:STATE")
+                    return True
+                except Exception as exc:
+                    self._log(f"Reopen {target} failed: {exc}")
+            for p in ports:
+                seen.add(p)
+            time.sleep(poll)
+        self._log(f"Timed out waiting for {wanted} to reappear.")
+        self.ser = None
         self._refresh_ports()
+        return False
 
     def _refresh_ports(self):
         """Refresh the Port dropdown from the OS COM list."""

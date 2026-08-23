@@ -398,15 +398,6 @@ void handlePcCommands(bool& s, bool& b, bool& m, bool& c) {
           emitBand();
           emitMode();
         }
-        else if (strcmp(pcCmdBuf, "!CMD:RESET") == 0) {
-          // Soft reboot via the ARM system-reset instruction. Unlike the
-          // 1200-baud touch this does NOT enter the DFU bootloader, so the
-          // USB-CDC port stays COM8 and the welcome screen reappears.
-          Serial.println("!REBOOT");
-          Serial.flush();
-          delay(100);
-          NVIC_SystemReset();
-        }
       } else if (currentState == STATE_IDLE) {
         // Pass non-command line through to the analyzer.
         AA_PORT.write(pcCmdBuf, strlen(pcCmdBuf));
