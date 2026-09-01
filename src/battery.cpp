@@ -47,9 +47,10 @@ int batteryBegin() {
   // Power-on reset.
   batWrite16(MAX17043_COMMAND, 0x5400);
   delay(10);
-  // Quick-start for a faster, more accurate SOC estimate.
+  // Quick-start: the gauge needs ~200ms after a quick-start to produce a
+  // valid state-of-charge estimate (it reads 0% immediately after).
   batWrite16(0x06, 0x4000);   // MAX17043_MODE quick-start
-  delay(10);
+  delay(250);
   return 0;
 }
 
