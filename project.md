@@ -100,7 +100,7 @@ Built with **PlatformIO** + Arduino framework, board `uno_r4_minima` (config: [`
 ✅ **Full 160 m → 10 m sweep recorded** (IARU **Region 1**, 100 points/band) in [`result.md`](result.md) and [`result_data.json`](result_data.json); per-band and combined SWR graphs rendered to PDF in [`graphs/`](graphs).
 🖥️ **Display**: DFRobot DFR0669 3.5" ILI9488 TFT (480×320, 3.3–5.5 V, no level shifter).
 🎛️ **Controls + UI**: GT911 capacitive touchscreen (BAND/START/MODE/CAL zones) drives the SWR curve + numeric readout.
-🔋 **Power + monitoring**: LiPower Shield 0.5A (3.7 V LiPo → 5 V) with MAX17043 fuel gauge; battery % on the display, low-batt alert (D2).
+🔋 **Power + monitoring**: LiPower Shield 0.5A (3.7 V LiPo → 5 V) with MAX17043 fuel gauge; battery % on the display, low-batt alert (D2). Read the battery only with the shield switch ON (gauge reads ~1 V when off); I2C pull-ups must be fitted.
 ✅ **Calibration implemented**: single-phase guided wizard (50 Ω reference) that sweeps all bands × 20 points, builds a per-band R/X offset table, stores it to EEPROM, and applies the correction (with linear interpolation between table points) to every normal sweep. Progress (band/point/bar) shown during calibration.
 ✅ **Modularized + robust**: split into focused modules; SHORT/OPEN verification phases removed (verification-only, no correction/EEPROM write); outlier-tolerant 90% band-vote; live-sweep watchdog fix; scan completes on trailing `OK`.
 ✅ **Builds cleanly with PlatformIO** (`renesas-ra` platform, `uno_r4_minima` board) — RAM 44.3%, Flash 34.7%.

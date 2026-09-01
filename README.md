@@ -54,7 +54,7 @@ across the HF amateur bands (160 m → 10 m). The AA-30.ZERO works as an Arduino
 - Full 160 m → 10 m sweep recorded and graphed (IARU **Region 1** bands, 100 points/band).
 - 🖥️ **Display**: DFRobot DFR0669 3.5" ILI9488 TFT (480×320, 3.3–5.5 V, **no level shifter**), GT911 capacitive touch (I²C).
 - 🎛️ **Controls + UI**: GT911 capacitive touchscreen (START/BAND/MODE/CAL zones) + live SWR curve / numeric readout.
-- 🔋 **Power**: LiPower Shield 0.5A (3.7 V LiPo → 5 V) with MAX17043 fuel gauge — battery % shown on the display, low-batt alert on D2.
+- 🔋 **Power**: LiPower Shield 0.5A (3.7 V LiPo → 5 V) with MAX17043 fuel gauge — battery % shown on the display, low-batt alert on D2. Read the battery only with the shield switch ON (the gauge reads ~1 V when the load is switched off).
 
 ## 🛠️ Hardware
 

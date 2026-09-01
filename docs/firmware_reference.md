@@ -226,6 +226,13 @@ Where a function lives is shown in the "Module" column.
 | `batteryClearAlert()` | Clear a latched alert. |
 | `batteryLowAlertActive()` | True if the ALRT pin (D2) is asserted (low battery). |
 
+> **Battery reading note:** the MAX17043 reads the correct battery voltage
+> **only when the LiPower shield's switch is ON** (the load is engaged). With the
+> switch OFF the gauge reports a bogus ~1 V and a misleading SOC — treat that as
+> "unloaded", not a real battery state. Always read the battery with the switch ON.
+> The I²C **pull-up resistors** on SDA/SCL must be fitted for the bus (and hence
+> the gauge) to read reliably.
+
 ### PC telemetry & commands (telemetry.cpp / main.cpp)
 | Function | Module | Purpose |
 |----------|--------|---------|
