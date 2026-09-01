@@ -15,27 +15,28 @@ C_SIG = "#1f4f8f"
 C_TCH = "#7b1fa2"
 C_PWR = "#1b5e20"
 
-fig, ax = plt.subplots(figsize=(16, 10), dpi=150)
+fig, ax = plt.subplots(figsize=(16, 11), dpi=150)
 ax.set_xlim(0, 100)
-ax.set_ylim(0, 90)
+ax.set_ylim(0, 96)
 ax.axis("off")
 
 # Display signal lanes (LCD SPI, 5-wire) from R4 to the MSP4021.
 LANES = [
-    ("CS",    62, "D10",  "CS"),
-    ("RESET", 55, "D8",   "RESET"),
-    ("DC/RS", 48, "D9",   "DC/RS"),
-    ("SDI(MOSI)", 41, "D11", "SDI"),
-    ("SCK",   34, "D13",  "SCK"),
-    ("SDO(MISO)", 27, "D12", "SDO"),
+    ("CS",    56, "D10",  "CS"),
+    ("RESET", 50, "D8",   "RESET"),
+    ("DC/RS", 44, "D9",   "DC/RS"),
+    ("SDI(MOSI)", 38, "D11", "SDI"),
+    ("SCK",   32, "D13",  "SCK"),
+    ("SDO(MISO)", 26, "D12", "SDO"),
 ]
 # Touch signal lanes (XPT2046, shares SPI bus; only CS/IRQ need their own pins).
+# A dedicated band below the display lanes so they never collide.
 TOUCH_LANES = [
-    ("T_CS",  62, "D6",  "T_CS"),
-    ("T_IRQ", 55, "A0",  "T_IRQ"),
+    ("T_CS",  22, "D6",  "T_CS"),
+    ("T_IRQ", 18, "A0",  "T_IRQ"),
 ]
-Y_5V, Y_GND = 18, 12
-BOX_TOP, BOX_BOT = 68, 9
+Y_5V, Y_GND = 14, 10
+BOX_TOP, BOX_BOT = 62, 8
 
 BLOCK_X = {"r4": (2.0, 16.0), "lcd": (62.0, 21.0)}
 R4_R = BLOCK_X["r4"][0] + BLOCK_X["r4"][1]
@@ -91,19 +92,19 @@ tag((R4_R + LCD_L) / 2, Y_GND - 1.8, "GND", C_GND)
 tag(LCD_L + 1.3, Y_GND, "GND", C_GND, ha="left")
 
 # --- heading -----------------------------------------------------------
-ax.text(2.0, 86.0, "Uno R4 Minima \N{RIGHTWARDS ARROW} LCDWIKI MSP4021 4.0\" TFT  \N{MIDDLE DOT}  LiPower battery shield",
+ax.text(2.0, 92.0, "Uno R4 Minima \N{RIGHTWARDS ARROW} LCDWIKI MSP4021 4.0\" TFT  \N{MIDDLE DOT}  LiPower battery shield",
         ha="left", va="center", fontsize=13.5, fontweight="bold", color="#263238")
-ax.text(2.0, 83.0, "MSP4021 (ST7796S, 480x320)  \N{MIDDLE DOT}  XPT2046 resistive touch (shared SPI)  \N{MIDDLE DOT}  LCDWIKI Arduino wiring, remapped for Uno R4",
+ax.text(2.0, 89.0, "MSP4021 (ST7796S, 480x320)  \N{MIDDLE DOT}  XPT2046 resistive touch (shared SPI)  \N{MIDDLE DOT}  LCDWIKI Arduino wiring, remapped for Uno R4",
         ha="left", va="center", fontsize=9, color="#455a64")
 
 # --- footnotes ---------------------------------------------------------
-ax.text(2.0, 79.0, "AA-30.ZERO:  UART1 TX \N{RIGHTWARDS ARROW} R4 D0 (Serial1 RX)  \N{MIDDLE DOT}  UART1 RX \N{RIGHTWARDS ARROW} R4 D1 (Serial1 TX)  \N{MIDDLE DOT}  GND common.",
+ax.text(2.0, 73.0, "AA-30.ZERO:  UART1 TX \N{RIGHTWARDS ARROW} R4 D0 (Serial1 RX)  \N{MIDDLE DOT}  UART1 RX \N{RIGHTWARDS ARROW} R4 D1 (Serial1 TX)  \N{MIDDLE DOT}  GND common.",
         ha="left", va="center", fontsize=8.2, color="#37474f")
-ax.text(2.0, 76.0, "Vendor UNO map uses A4 (RESET) and A5 (CS); on the R4 those are the I2C pins (battery gauge) so they are moved to D8/D10.",
+ax.text(2.0, 70.0, "Vendor UNO map uses A4 (RESET) and A5 (CS); on the R4 those are the I2C pins (battery gauge) so they are moved to D8/D10.",
         ha="left", va="center", fontsize=8.0, color="#b71c1c")
-ax.text(2.0, 73.0, "MSP4021 pins: VCC GND CS RESET DC/RS SDI(MOSI) SCK LED SDO(MISO)  \N{MIDDLE DOT}  touch: T_CLK T_CS T_DIN T_DO T_IRQ.",
+ax.text(2.0, 67.0, "MSP4021 pins: VCC GND CS RESET DC/RS SDI(MOSI) SCK LED SDO(MISO)  \N{MIDDLE DOT}  touch: T_CLK T_CS T_DIN T_DO T_IRQ.",
         ha="left", va="center", fontsize=8.0, color="#37474f")
-ax.text(2.0, 70.0, "The module shares the SPI bus between display and touch (SJ1-SJ3 jumpered): T_DIN=MOSI D11, T_DO=MISO D12, T_CLK=SCK D13; only T_CS (D6) and T_IRQ (A0) are unique.",
+ax.text(2.0, 64.0, "Module shares the SPI bus between display and touch (SJ1-SJ3): T_DIN=MOSI, T_DO=MISO, T_CLK=SCK; only T_CS (D6) and T_IRQ (A0) are unique.",
         ha="left", va="center", fontsize=8.0, color="#7b1fa2")
 
 # --- legend ----------------------------------------------------------
@@ -113,7 +114,7 @@ handles = [
     plt.Line2D([0], [0], color=C_U5V, lw=2.2, label="VCC 5 V"),
     plt.Line2D([0], [0], color=C_GND, lw=2.2, label="GND"),
 ]
-ax.legend(handles=handles, loc="center left", bbox_to_anchor=(0.005, 0.74),
+ax.legend(handles=handles, loc="center left", bbox_to_anchor=(0.005, 0.88),
           ncol=2, fontsize=8, frameon=False)
 
 # --- LiPower battery shield inset (right) ---------------------------------
