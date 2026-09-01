@@ -39,14 +39,18 @@ static void batWriteRegBits(uint8_t reg, uint16_t dat, uint16_t bits, uint8_t of
 }
 
 int batteryBegin() {
+  // Probe the I2C address: if nothing ACKs, the shield/gauge isn't on the bus.
+  Wire.beginTransmission(MAX17043_ADDR);
+  if (Wire.endTransmission() != 0) {
+    return -1;   // no device at 0x36
+  }
   // Power-on reset.
   batWrite16(MAX17043_COMMAND, 0x5400);
   delay(10);
   // Quick-start for a faster, more accurate SOC estimate.
   batWrite16(0x06, 0x4000);   // MAX17043_MODE quick-start
   delay(10);
-  // Confirm the chip responds (read CONFIG; 0x971c default).
-  return (batRead16(MAX17043_CONFIG) == 0x971C) ? 0 : -1;
+  return 0;
 }
 
 float batteryVoltageMv() {

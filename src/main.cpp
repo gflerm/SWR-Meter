@@ -102,6 +102,14 @@ void handlePcCommands(bool& s, bool& b, bool& m, bool& c) {
           emitBand();
           emitMode();
           emitCtrl();
+          Serial.print("@BATT:");
+          if (batteryPresent) {
+            Serial.print((int)batteryPct);
+            Serial.print(",");
+            Serial.println((int)batteryMv);
+          } else {
+            Serial.println("none");
+          }
         }
       } else if (currentState == STATE_IDLE) {
         // Pass non-command line through to the analyzer.
