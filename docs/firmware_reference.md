@@ -23,6 +23,7 @@ do not depend on each other circularly.
 | `hardware.h`/`hardware.cpp` | Definitions of all global state, the `tft` display object, the GT911 `touch` object and the AA-30 `Serial1` port. |
 | `display.h`/`display.cpp` | Every DFRobot DFR0669 (ILI9488) render call (`updateDisplay`, `draw*`) + the external-control splash. |
 | `touch.h`/`touch.cpp` | GT911 capacitive touch scan + tap→action classifier. |
+| `battery.h`/`battery.cpp` | LiPower MAX17043 fuel gauge: voltage, state-of-charge, low-batt alert (I2C 0x36). |
 | `rigexpert.h`/`rigexpert.cpp` | AA-30 driver: UART polling, ASCII parser, validation, SWR math, `startScan`. |
 | `calibration.h`/`calibration.cpp` | Calibration wizard, EEPROM table save/load, `applyCalibration`. |
 | `telemetry.h`/`telemetry.cpp` | `emit*` telemetry writers, `showStatus`, `isSweepStuck`. |
@@ -49,9 +50,13 @@ hardware object is touched.
 | Display BL | on by default | Not a GPIO |
 | Touch SDA | A4 | GT911 capacitive touch (I²C, addr 0x5D) |
 | Touch SCL | A5 | GT911 capacitive touch (I²C) |
+| LiPo gauge | A4/A5 | LiPower MAX17043 fuel gauge (I²C, addr 0x36, same bus) |
+| LiPower 5 V out | 5 V | Powers R4 + DFR0669 (3.7 V LiPo boost) |
+| Low-batt ALRT | D2 | MAX17043 alert (active-low), warns at ≤32 % |
 
 AA-30 UART = **38400 baud**. PC/USB CDC `Serial` = **115200 baud**. UI is driven by
-the GT911 **touchscreen** (no physical buttons).
+the GT911 **touchscreen** (no physical buttons); the **LiPower shield** powers the
+unit and reports the battery.
 
 ---
 
@@ -69,6 +74,7 @@ the GT911 **touchscreen** (no physical buttons).
 | `TOUCH_DEBOUNCE_MS` | 40 | Touch hold time to register a press |
 | `SCAN_TIMEOUT_MS` | 8000 | Abort a hung sweep after this |
 | `TFT_W` / `TFT_H` | 480 / 320 | Landscape display size |
+| `BAT_LOW_PCT` | 32 | Warn when battery drops to this % |
 | `CAL_PTS_PER_BAND` | 20 | Calibration points per band |
 | `CAL_MAX_RETRIES` | 3 | Single-point re-measures per bogus slot |
 | `CAL_PASS_PCT` | 90 | Minimum % valid points to accept a band |
@@ -209,6 +215,16 @@ Where a function lives is shown in the "Module" column.
 | Function | Purpose |
 |----------|---------|
 | `touchReadAction(uint16_t w, uint16_t h)` | Scan the GT911, debounce, and classify the press into a `TouchAction` (START/BAND/MODE/CAL/ANY). |
+
+### Battery (battery.cpp)
+| Function | Purpose |
+|----------|---------|
+| `batteryBegin()` | Init the MAX17043 (power-on reset + quick-start); 0 = OK. |
+| `batteryVoltageMv()` | Read battery voltage in mV. |
+| `batteryPercent()` | Read state-of-charge (0-100 %). |
+| `batterySetAlert(uint8_t per)` | Set the low-batt alert threshold (1-32 %). |
+| `batteryClearAlert()` | Clear a latched alert. |
+| `batteryLowAlertActive()` | True if the ALRT pin (D2) is asserted (low battery). |
 
 ### PC telemetry & commands (telemetry.cpp / main.cpp)
 | Function | Module | Purpose |

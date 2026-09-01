@@ -18,8 +18,9 @@ The system combines the Uno R4 Minima, the AA-30 Zero RF Analyzer, and a yet-to-
 *   **UNO R4 Minima:** The main microcontroller board.
 *   **AA-30 Zero:** The RF analyzer (Communicates via UART at 38400 baud).
 *   **DFRobot DFR0669 3.5" TFT (ILI9488):** The 480x320 display with GT911 capacitive touch; runs at 3.3–5.5 V (**no level shifter**).
+*   **LiPower Shield 0.5A (ACS33721L):** 3.7 V LiPo → 5 V power + MAX17043 fuel gauge (I2C 0x36), low-batt alert on D2.
 *   **Control:** on-screen GT911 capacitive touch (BAND / START / MODE / CAL zones).
-*   **Wiring:** connectors bridging the components (SPI D8–D13 + touch I²C A4/A5).
+*   **Wiring:** connectors bridging the components (SPI D8–D13 + touch/battery I²C A4/A5).
 
 ## 📡 Communication Protocol
 The AA-30 Zero uses UART at 38400 baud and supports multiple measured systems (25, 50, 75, 100 Ohm).
@@ -87,7 +88,7 @@ The state machine in `src/main.cpp` enforces this critical sequence:
 
 ## 💾 Software Implementation
 Built with **PlatformIO** + Arduino framework, board `uno_r4_minima` (config: [`platformio.ini`](platformio.ini)).
-*   **Modular structure:** `src/main.cpp` is a thin orchestrator (`setup`/`loop`/state machine/PC commands). Handlers live in their own modules: `display.*` (DFR0669/ILI9488 render), `touch.*` (GT911 scan + classifier), `rigexpert.*` (AA-30 parser/scans), `calibration.*` (wizard/EEPROM), `telemetry.*` (`@`-telemetry), plus `config.h` (pins/types) and `hardware.h`/`.cpp` (shared global state + `tft`/`touch` + `Serial1`).
+*   **Modular structure:** `src/main.cpp` is a thin orchestrator (`setup`/`loop`/state machine/PC commands). Handlers live in their own modules: `display.*` (DFR0669/ILI9488 render), `touch.*` (GT911 scan + classifier), `battery.*` (MAX17043 gauge), `rigexpert.*` (AA-30 parser/scans), `calibration.*` (wizard/EEPROM), `telemetry.*` (`@`-telemetry), plus `config.h` (pins/types) and `hardware.h`/`.cpp` (shared global state + `tft`/`touch` + `Serial1`).
 *   **Bridge Functionality:** manages the two serial lines (PC `Serial` + analyzer `Serial1`) and relays data.
 *   **Measurement Logic:** the state machine orchestrates the command sequence, parsing and SWR calculation based on the protocol.
 *   **Validation:** Incoming `freq,R,X` lines are parsed **syntactically** (finite, in-range) then gated for physical plausibility on normal sweeps (`R`/`|X|` sensible, SWR in `[1,100]`). NaN/Inf and absurd magnitudes are discarded. Valid points are stored in `scanPoints[]` with computed SWR.
@@ -99,6 +100,7 @@ Built with **PlatformIO** + Arduino framework, board `uno_r4_minima` (config: [`
 ✅ **Full 160 m → 10 m sweep recorded** (IARU **Region 1**, 100 points/band) in [`result.md`](result.md) and [`result_data.json`](result_data.json); per-band and combined SWR graphs rendered to PDF in [`graphs/`](graphs).
 🖥️ **Display**: DFRobot DFR0669 3.5" ILI9488 TFT (480×320, 3.3–5.5 V, no level shifter).
 🎛️ **Controls + UI**: GT911 capacitive touchscreen (BAND/START/MODE/CAL zones) drives the SWR curve + numeric readout.
+🔋 **Power + monitoring**: LiPower Shield 0.5A (3.7 V LiPo → 5 V) with MAX17043 fuel gauge; battery % on the display, low-batt alert (D2).
 ✅ **Calibration implemented**: single-phase guided wizard (50 Ω reference) that sweeps all bands × 20 points, builds a per-band R/X offset table, stores it to EEPROM, and applies the correction (with linear interpolation between table points) to every normal sweep. Progress (band/point/bar) shown during calibration.
 ✅ **Modularized + robust**: split into focused modules; SHORT/OPEN verification phases removed (verification-only, no correction/EEPROM write); outlier-tolerant 90% band-vote; live-sweep watchdog fix; scan completes on trailing `OK`.
 ✅ **Builds cleanly with PlatformIO** (`renesas-ra` platform, `uno_r4_minima` board) — RAM 44.3%, Flash 34.7%.

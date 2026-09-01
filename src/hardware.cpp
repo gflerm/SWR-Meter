@@ -58,3 +58,9 @@ CalResult  calResult;
 
 CalBand calTable[NUM_BANDS];
 bool    calValid = false;
+
+// ---- battery / power --------------------------------------------------
+
+float  batteryPct     = 0.0f;
+float  batteryMv      = 0.0f;
+bool   batteryPresent = false;

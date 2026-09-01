@@ -38,6 +38,7 @@
 #include "rigexpert.h"
 #include "calibration.h"
 #include "touch.h"
+#include "battery.h"
 
 // ======================================================================
 // LOCAL (non-shared) STATE
@@ -221,7 +222,8 @@ void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, b
 // ======================================================================
 
 /**
- * @brief One-time initialisation: UARTs, EEPROM, display, touch and boot page.
+ * @brief One-time initialisation: UARTs, EEPROM, display, touch, battery and
+ *        boot page.
  */
 void setup() {
   AA_PORT.begin(38400);   // AA-30 analyzer UART1
@@ -236,6 +238,21 @@ void setup() {
 
   touch.begin();                   // GT911 capacitive touch (I2C)
 
+  // LiPo fuel gauge (MAX17043) shares the same I2C bus (address 0x36).
+  pinMode(BAT_ALERT_PIN, INPUT_PULLUP);   // active-low low-battery alert
+  if (batteryBegin() == 0) {
+    batteryPresent = true;
+    batterySetAlert(BAT_LOW_PCT);
+    batteryPct = batteryPercent();
+    batteryMv  = batteryVoltageMv();
+    Serial.print("Battery gauge OK: ");
+    Serial.print(batteryPct); Serial.print("%  ");
+    Serial.print(batteryMv); Serial.println(" mV");
+  } else {
+    batteryPresent = false;
+    Serial.println("No battery gauge (LiPower shield not detected).");
+  }
+
   displayWelcome();
   emitState("WELCOME");
 }
@@ -245,7 +262,24 @@ void setup() {
  *        and drain the analyzer UART.
  */
 void loop() {
+  static uint32_t lastBattery = 0;
   uint32_t now = millis();
+
+  // Refresh the fuel gauge ~2x/sec (throttled I2C read; cheap).
+  if (batteryPresent && (now - lastBattery) >= 500) {
+    lastBattery = now;
+    batteryPct = batteryPercent();
+    batteryMv  = batteryVoltageMv();
+  }
+
+  // Low-battery warning: flash a status message while the alert is active or
+  // the gauge reads at/below the threshold.
+  if (batteryPresent) {
+    bool low = batteryLowAlertActive() || batteryPct <= BAT_LOW_PCT;
+    if (low && statusMsg == NULL) {
+      showStatus("LOW BATTERY", 1500);
+    }
+  }
 
   // Poll touch and translate the current press into one-shot button edges.
   TouchAction act = touchReadAction(TFT_W, TFT_H);

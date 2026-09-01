@@ -28,11 +28,14 @@
 #define TFT_W   480  // landscape width after setRotation(1)
 #define TFT_H   320  // landscape height after setRotation(1)
 
-// --- Capacitive touch: DFR0669 GT911 over hardware I2C (Wire).
-//     R4 Wire = SDA A4, SCL A5. GT911 default address 0x5D; INT/RST unused.
+// --- Touch INT / low battery alert: DFR0669 GT911 touch + LiPower MAX17043 ---
+// Both the DFR0669 SPI (D8-D13) and the GT911 touch / MAX17043 gauge share
+// the A4/A5 I2C bus; the LiPower low-battery alert pin is broken out to D2.
 #define TOUCH_I2C_ADDR 0x5D
 #define TOUCH_INT_PIN  0xFF  // GDL_PIN_NC (int unused)
 #define TOUCH_RST_PIN  0xFF  // GDL_PIN_NC (reset unused)
+#define BAT_ALERT_PIN  2     // LiPower MAX17043 ALRT (active-low)
+#define BAT_LOW_PCT    32    // warn when battery drops to this % (matches alert)
 
 // --- AA-30 signal analysis
 #define Z0 50.0f                 // system impedance for SWR math (default 50 ohm)

@@ -83,10 +83,22 @@ tag(R4_R + 6 - 0.6, TCH_Y, "A4/A5", C_TCH, ha="right", fs=8.0)
 tag(LCD_L + 1.3, TCH_Y, "SDA/SCL", C_TCH, ha="left", fs=8.0)
 
 # --- heading ----------------------------------------------------------
-ax.text(2.0, 92.0, "Uno R4 Minima \N{RIGHTWARDS ARROW} DFRobot DFR0669 3.5\" TFT wiring",
+ax.text(2.0, 92.0, "Uno R4 Minima \N{RIGHTWARDS ARROW} DFRobot DFR0669 TFT  \N{MIDDLE DOT}  LiPower battery shield",
         ha="left", va="center", fontsize=13.5, fontweight="bold", color="#263238")
-ax.text(2.0, 89.0, "DFRobot DFR0669 (ILI9488, 480x320, 3.3-5.5 V)  \N{MIDDLE DOT}  GT911 capacitive touch over I2C",
+ax.text(2.0, 89.0, "DFRobot DFR0669 (ILI9488, 480x320, 3.3-5.5 V)  \N{MIDDLE DOT}  GT911 touch I2C  \N{MIDDLE DOT}  LiPower shield (3.7 V LiPo \N{RIGHTWARDS ARROW} 5 V)",
         ha="left", va="center", fontsize=9, color="#455a64")
+
+# --- LiPower battery shield inset (right, below the TFT block) -------------
+BX, BY, BW, BH = 46, 71, 46, 10
+ax.add_patch(FancyBboxPatch((BX, BY), BW, BH,
+                            boxstyle="round,pad=0.3,rounding_size=0.9",
+                            linewidth=1.2, edgecolor="#1b5e20", facecolor="#f2f7f2", zorder=2))
+ax.text(BX + BW / 2, BY + BH - 1.6, "LiPower Shield 0.5A  (power + fuel gauge)",
+        ha="center", va="center", fontsize=9, fontweight="bold", color="#1b5e20", zorder=3)
+ax.text(BX + BW / 2, BY + 5.2, "3.7 V LiPo \N{RIGHTWARDS ARROW} 5 V  \N{MIDDLE DOT}  MAX17043 gauge \N{RIGHTWARDS ARROW} I2C A4/A5 @0x36",
+        ha="center", va="center", fontsize=8.2, color="#455a64", zorder=3)
+ax.text(BX + BW / 2, BY + 3.0, "low-battery ALRT \N{RIGHTWARDS ARROW} D2  \N{MIDDLE DOT}  charges LiPo via mini-USB (500 mA)",
+        ha="center", va="center", fontsize=8.2, color="#455a64", zorder=3)
 
 # --- footnotes ---------------------------------------------------------
 ax.text(2.0, 85.0, "AA-30.ZERO:  UART1 TX \N{RIGHTWARDS ARROW} R4 D0 (Serial1 RX)  \N{MIDDLE DOT}  UART1 RX \N{RIGHTWARDS ARROW} R4 D1 (Serial1 TX)  \N{MIDDLE DOT}  GND common.",
@@ -95,8 +107,10 @@ ax.text(2.0, 82.0, "Module runs at 3.3-5.5 V, so SPI logic needs NO level shifte
         ha="left", va="center", fontsize=8.0, color="#37474f")
 ax.text(2.0, 79.0, "Display uses SPI D8\N{EN DASH}D13; touch uses I2C A4/A5; AA-30 uses D0/D1 \N{EM DASH} no overlap. Touch INT and SDCS are not used.",
         ha="left", va="center", fontsize=8.0, color="#37474f")
-ax.text(2.0, 76.0, "DFR0669 pins: VCC GND SCLK MOSI MISO CS RES DC BL  \N{MIDDLE DOT}  touch: SCL SDA INT  \N{MIDDLE DOT}  SD: SDCS.  MISO may be left unconnected.",
+ax.text(2.0, 76.0, "Display: SPI D8-D13  \N{MIDDLE DOT}  touch: I2C A4/A5  \N{MIDDLE DOT}  AA-30: D0/D1  \N{EM DASH} no overlap.  MISO optional.",
         ha="left", va="center", fontsize=8.0, color="#37474f")
+ax.text(2.0, 73.0, "LiPower: 5 V powers R4 + DFR0669; MAX17043 gauge shares I2C A4/A5 (0x36) with GT911 (0x5D); low-batt ALRT on D2.",
+        ha="left", va="center", fontsize=8.0, color="#1b5e20")
 
 # --- legend ----------------------------------------------------------
 handles = [

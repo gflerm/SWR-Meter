@@ -155,6 +155,17 @@ void updateDisplay() {
     case STATE_SCANNING:   tft.print("SCANNING..."); break;
     case STATE_DISPLAYING: tft.print("TAP TO SCAN"); break;
   }
+  // Battery readout (top-right), when a gauge is present.
+  if (batteryPresent) {
+    tft.setCursor(SCR_W - 60, 6);
+    tft.setTextColor(batteryPct <= BAT_LOW_PCT ? COLOR_YELLOW : COLOR_WHITE, COLOR_BLUE);
+    tft.print((int)batteryPct);
+    tft.print("%");
+    if (batteryPct <= BAT_LOW_PCT) {
+      tft.print("!");   // low-battery marker in the header
+    }
+    tft.setTextColor(COLOR_WHITE, COLOR_BLUE);
+  }
 
   // Calibration screens take over the page body.
   if (currentState == STATE_CALIBRATE) {

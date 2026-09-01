@@ -150,9 +150,14 @@ def draw_welcome(t):
     t.setTextColor(LIGHTGREY, BLACK)
     t.print("Tap the screen to continue")
 
+    # Battery readout (top-right).
+    t.setTextColor(WHITE, BLUE)
+    t.setCursor(W - 60, 30)
+    t.print("90%")
 
-def draw_header(t, band, state, cal_active=False):
-    t.fillRect(0, 0, 480, 24, BLUE)
+
+def draw_header(t, band, state, cal_active=False, batt_pct=None):
+    t.fillRect(0, 0, W, 24, BLUE)
     t.setTextColor(WHITE, BLUE)
     t.setTextSize(1)
     t.setCursor(4, 6)
@@ -168,6 +173,11 @@ def draw_header(t, band, state, cal_active=False):
         t.print("SCANNING...")
     elif state == "DISPLAYING":
         t.print("TAP TO SCAN" if not cal_active else "CAL RESULT")
+    if batt_pct is not None:
+        t.setCursor(W - 60, 6)
+        t.setTextColor(YELLOW if batt_pct <= 32 else WHITE, BLUE)
+        t.print("%d%%" % batt_pct)
+        t.setTextColor(WHITE, BLUE)
 
 
 def draw_idle(t, band):

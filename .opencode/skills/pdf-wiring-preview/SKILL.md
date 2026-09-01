@@ -34,7 +34,7 @@ Then `read` the generated PNG to confirm the layout looks right before declaring
 ## Wiring nets (single source of truth)
 
 The DFR0669 runs at 3.3-5.5 V, so **no level shifter / adapter board** is needed.
-SPI is wired directly to the R4; GT911 touch is on I2C.
+SPI is wired directly to the R4; GT911 touch and the LiPower fuel gauge are on I2C.
 
 | DFR0669 pin | R4 pin        | Net                      |
 |-------------|---------------|--------------------------|
@@ -46,11 +46,20 @@ SPI is wired directly to the R4; GT911 touch is on I2C.
 | DC          | D9            | data/command             |
 | RES         | D8            | reset                    |
 | BL          | on by default | backlight (no GPIO)      |
-| SDA         | A4 (Wire SDA) | GT911 touch I2C          |
-| SCL         | A5 (Wire SCL) | GT911 touch I2C          |
+| SDA         | A4 (Wire SDA) | GT911 touch + MAX17043 gauge (I2C) |
+| SCL         | A5 (Wire SCL) | GT911 touch + MAX17043 gauge (I2C) |
 | MISO        | (optional)    | not used                 |
 | INT         | (optional)    | touch interrupt, not used|
 | SDCS        | (optional)    | MicroSD, not used        |
+
+## LiPower Shield 0.5A (power + fuel gauge)
+
+| Net | R4 pin | Details |
+|-----|--------|---------|
+| 5 V out | 5 V rail | 3.7 V LiPo boosted to 5 V (powers R4 + DFR0669) |
+| MAX17043 gauge | I2C A4/A5 (0x36) | shares the touch I2C bus (no address conflict with GT911 @0x5D) |
+| Low-batt ALRT | D2 | active-low alert at/below the set threshold (32 %) |
+| Charge | mini-USB | charges the LiPo at 500 mA |
 
 ## Touch UI
 

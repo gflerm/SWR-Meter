@@ -54,6 +54,7 @@ across the HF amateur bands (160 m → 10 m). The AA-30.ZERO works as an Arduino
 - Full 160 m → 10 m sweep recorded and graphed (IARU **Region 1** bands, 100 points/band).
 - 🖥️ **Display**: DFRobot DFR0669 3.5" ILI9488 TFT (480×320, 3.3–5.5 V, **no level shifter**), GT911 capacitive touch (I²C).
 - 🎛️ **Controls + UI**: GT911 capacitive touchscreen (START/BAND/MODE/CAL zones) + live SWR curve / numeric readout.
+- 🔋 **Power**: LiPower Shield 0.5A (3.7 V LiPo → 5 V) with MAX17043 fuel gauge — battery % shown on the display, low-batt alert on D2.
 
 ## 🛠️ Hardware
 
@@ -62,6 +63,7 @@ across the HF amateur bands (160 m → 10 m). The AA-30.ZERO works as an Arduino
 | **Uno R4 Minima** (Renesas RA4M1) | Main controller |
 | **AA-30.ZERO** | RF analyzer, 0.06–30 MHz, UART @ 38400 |
 | **DFRobot DFR0669 3.5" TFT** (ILI9488, 480×320, 3.3–5.5 V) | Display + GT911 capacitive touch |
+| **LiPower Shield 0.5A** (ACS33721L) | 3.7 V LiPo → 5 V power + MAX17043 fuel gauge (I²C) |
 
 ### Wiring (AA-30.ZERO UART1 → Uno R4)
 The AA-30.ZERO has two UARTs. On the R4, the **only reliable path** is hardware `Serial1`
@@ -132,7 +134,8 @@ The firmware is split into focused modules under `src/`, orchestrated by a thin
 | `hardware.h`/`.cpp` | all global state + the `tft` + GT911 `touch` objects + the AA-30 `Serial1` |
 | `display.h`/`.cpp` | every DFRobot DFR0669 (ILI9488) render call + external-control splash |
 | `touch.h`/`.cpp` | GT911 capacitive-touch scan + tap→action classifier |
-| `rigexpert.h`/`.cpp` | AA-30 UART poll, ASCII parser, validation, scan driver |
+| `battery.h`/`.cpp` | LiPower MAX17043 fuel gauge (voltage, SOC, low-batt alert) |
+| `rigexpert.h`/`.cpp` | AA-30 UART poll, parser, scan driver |
 | `calibration.h`/`.cpp` | calibration wizard, EEPROM table, correction |
 | `telemetry.h`/`.cpp` | `@STATE`/`@BAND`/`@MODE`/`@CTRL`/`@CAL*` emit helpers |
 

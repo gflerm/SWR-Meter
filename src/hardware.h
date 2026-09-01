@@ -83,4 +83,9 @@ extern CalResult  calResult;
 extern CalBand calTable[NUM_BANDS];
 extern bool    calValid;   // a valid correction table is loaded
 
+// ---- battery / power -------------------------------------------------
+extern float  batteryPct;      // last read state-of-charge (0-100 %)
+extern float  batteryMv;       // last read battery voltage (mV)
+extern bool   batteryPresent;  // MAX17043 responded on the I2C bus
+
 #endif // HARDWARE_H
