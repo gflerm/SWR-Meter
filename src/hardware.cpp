@@ -10,8 +10,7 @@
 
 // ---- hardware objects ------------------------------------------------
 
-DFRobot_ILI9488_320x480_HW_SPI tft(/*dc=*/TFT_DC, /*cs=*/TFT_CS, /*rst=*/TFT_RST, /*bl=*/TFT_BL);
-DFRobot_Touch_GT911 touch(/*addr=*/TOUCH_I2C_ADDR, /*rst=*/TOUCH_RST_PIN, /*irq=*/TOUCH_INT_PIN);
+TFT_eSPI tft = TFT_eSPI();   // MSP4021 ST7796S + XPT2046 (pins from build_flags)
 
 // ---- machine-wide state ----------------------------------------------
 

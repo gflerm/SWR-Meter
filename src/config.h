@@ -17,23 +17,18 @@
 // bottleneck while streaming many measurement points.
 #define PC_BAUD 115200
 
-// --- Display: DFRobot DFR0669 3.5" 480x320 TFT, ILI9488, 4-wire SPI.
-//     The module runs at 3.3-5.5 V so NO level shifter is needed. SPI bus is
-//     fixed on the R4 (MOSI=11, SCK=13); only CS/DC/RST/BL are free to choose.
-//     Native panel is 320x480 (portrait); we rotate to 480x320 landscape.
-#define TFT_CS  10
-#define TFT_DC   9
-#define TFT_RST  8
-#define TFT_BL  0xFF  // GDL_PIN_NC: backlight is on by default; no GPIO control
-#define TFT_W   480  // landscape width after setRotation(1)
-#define TFT_H   320  // landscape height after setRotation(1)
+// --- Display: LCDWIKI MSP4021 4.0" 480x320 TFT (ST7796S), 4-wire SPI. ---
+//     Driven via TFT_eSPI, whose pin definitions are set in platformio.ini
+//     (build_flags): SPI MOSI=11, SCK=13, MISO=12, CS=D10, DC=D9, RST=D8,
+//     LED=D7, touch CS=D6. The module shares the SPI bus between the display
+//     and the XPT2046 touch (SJ1-SJ3 jumpered). The vendor UNO map uses A4/A5
+//     (RESET/CS); on the R4 those are the I2C bus (battery gauge), so the pins
+//     are moved to D8/D10. Native panel is 320x480 (portrait); rotated to
+//     480x320 landscape.
+#define TFT_W    480  // landscape width after setRotation(1)
+#define TFT_H    320  // landscape height after setRotation(1)
 
-// --- Touch INT / low battery alert: DFR0669 GT911 touch + LiPower MAX17043 ---
-// Both the DFR0669 SPI (D8-D13) and the GT911 touch / MAX17043 gauge share
-// the A4/A5 I2C bus; the LiPower low-battery alert pin is broken out to D2.
-#define TOUCH_I2C_ADDR 0x5D
-#define TOUCH_INT_PIN  0xFF  // GDL_PIN_NC (int unused)
-#define TOUCH_RST_PIN  0xFF  // GDL_PIN_NC (reset unused)
+// --- LiPower MAX17043 low-battery alert (active-low) on D2 ---------------
 #define BAT_ALERT_PIN  2     // LiPower MAX17043 ALRT (active-low)
 #define BAT_LOW_PCT    32    // warn when battery drops to this % (matches alert)
 

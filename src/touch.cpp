@@ -6,13 +6,15 @@
 #include "hardware.h"
 #include "config.h"
 
-// The current press action, latched while a finger is held.
+// TFT_eSPI's getTouch() returns true when a press exceeds this pressure
+// threshold (raw Z). Tune for the XPT2046 resistive panel.
+#define TOUCH_Z_THRESHOLD 600
+
+// A press is only registered once it has been held this long (debounce).
 static TouchAction activeAction = TOUCH_NONE;
 static uint32_t    pressSince    = 0;
 static uint32_t    lastScan      = 0;
-// Poll the touch at a modest rate so its I2C transactions don't starve the
-// MAX17043 fuel-gauge reads on the same shared bus (A4/A5).
-#define TOUCH_SCAN_MS 15
+#define TOUCH_SCAN_MS 15   // poll rate so SPI/touch doesn't hog the loop
 
 /**
  * @brief Classify a screen coordinate into a UI action by region.
@@ -40,41 +42,28 @@ static TouchAction actionAt(int x, int y, uint16_t w, uint16_t h) {
 }
 
 TouchAction touchReadAction(uint16_t screenW, uint16_t screenH) {
-  // Rate-limit the scan so the fuel-gauge reads on the same bus aren't starved.
+  // Rate-limit the poll so the touch SPI reads don't hog the loop.
   uint32_t now = millis();
   if ((now - lastScan) < TOUCH_SCAN_MS) {
     return TOUCH_NONE;
   }
   lastScan = now;
 
-  // Scan the touch controller for up to 5 points; we only use the first.
-  String pts = touch.scan();
-  // Parse the first "id,x,y,w,h " token.
-  int firstSpace = pts.indexOf(' ');
-  String first = (firstSpace > 0) ? pts.substring(0, firstSpace) : pts;
-  long id = 0; int x = 0, y = 0;
-  int c1 = first.indexOf(',');
-  int c2 = (c1 > 0) ? first.indexOf(',', c1 + 1) : -1;
-  if (c1 > 0) {
-    id = first.substring(0, c1).toInt();
-    x  = (c2 > 0) ? first.substring(c1 + 1, c2).toInt() : 0;
-    y  = (c2 > 0) ? first.substring(c2 + 1).toInt() : 0;
-  }
-  // Guard/clamp against the touch panel's native 320x480 addressing.
-  if (id < 0 || id == 255) {          // 255,0,0,0,0 = no touch
+  // Sample the XPT2046. getTouch() returns true if a press is detected with
+  // enough force (raw Z > threshold).
+  uint16_t x = 0, y = 0;
+  bool pressed = tft.getTouch(&x, &y, TOUCH_Z_THRESHOLD);
+  if (!pressed) {
     activeAction = TOUCH_NONE;
     pressSince = 0;
     return TOUCH_NONE;
   }
-  // Remap native touch (320x480 portrait) to our 480x320 landscape.
-  // The touch panel is 320 wide x 480 tall natively; after rotating the
-  // display 90°, a (tx,ty) maps to landscape (x,y) = (ty, 319 - tx).
-  int lx = y;
-  int ly = 319 - x;
-  if (lx < 0) lx = 0; if (lx >= (int)screenW) lx = screenW - 1;
-  if (ly < 0) ly = 0; if (ly >= (int)screenH) ly = screenH - 1;
 
-  TouchAction act = actionAt(lx, ly, screenW, screenH);
+  // Clamp into the panel (calibration may return slightly out-of-range).
+  if (x >= screenW) x = screenW - 1;
+  if (y >= screenH) y = screenH - 1;
+
+  TouchAction act = actionAt(x, y, screenW, screenH);
   if (act != activeAction) {
     activeAction = act;
     pressSince = now;

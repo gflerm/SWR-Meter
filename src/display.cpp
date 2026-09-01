@@ -6,19 +6,19 @@
 #include "hardware.h"
 #include "calibration.h"
 
-// Color aliases (DFRobot_GDL RGB565 constants) for readability.
-#define COLOR_BLACK   COLOR_RGB565_BLACK
-#define COLOR_WHITE   COLOR_RGB565_WHITE
-#define COLOR_BLUE    COLOR_RGB565_BLUE
-#define COLOR_YELLOW  COLOR_RGB565_YELLOW
-#define COLOR_GREEN   COLOR_RGB565_GREEN
-#define COLOR_CYAN    COLOR_RGB565_CYAN
-#define COLOR_ORANGE  COLOR_RGB565_ORANGE
-#define COLOR_LGRAY   COLOR_RGB565_LGRAY
-#define COLOR_DGRAY   COLOR_RGB565_DGRAY
-#define COLOR_RED     COLOR_RGB565_RED
+// Color aliases (TFT_eSPI RGB565 constants) for readability.
+#define COLOR_BLACK   TFT_BLACK
+#define COLOR_WHITE   TFT_WHITE
+#define COLOR_BLUE    TFT_BLUE
+#define COLOR_YELLOW  TFT_YELLOW
+#define COLOR_GREEN   TFT_GREEN
+#define COLOR_CYAN    TFT_CYAN
+#define COLOR_ORANGE  TFT_ORANGE
+#define COLOR_LGRAY   TFT_LIGHTGREY
+#define COLOR_DGRAY   TFT_DARKGREY
+#define COLOR_RED     TFT_RED
 
-// Panel is 480x320 landscape (ILI9488 native 320x480, rotated 90°).
+// Panel is 480x320 landscape (ST7796S native 320x480, rotated 90°).
 #define SCR_W TFT_W
 #define SCR_H TFT_H
 
@@ -79,7 +79,7 @@ void displayWelcome() {
   tft.print("Tap the screen to continue");
 
   Serial.println("==========================================================");
-  Serial.println("SWR METER BOOTED: Uno R4 Minima + AA-30 Zero + DFR0669");
+  Serial.println("SWR METER BOOTED: Uno R4 Minima + AA-30 Zero + MSP4021");
   Serial.println("[BAND] band  [START] scan  [MODE] layout  [CAL] calibrate");
   Serial.println("==========================================================");
 }

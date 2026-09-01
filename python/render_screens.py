@@ -1,4 +1,4 @@
-"""Render the firmware's DFR0669 (480x320) screens to PNG.
+"""Render the firmware's MSP4021 (480x320) screens to PNG.
 
 Uses a built-in pixel font (or PIL's default if the classic Adafruit glcdfont is
 no longer present) so the screens can be regenerated for documentation without

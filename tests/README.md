@@ -51,8 +51,8 @@ Each run appends to `tests/test_log.md`.
   the USB port re-enumerates.
 - G5 — attach a 50 Ω load at the wizard prompt and confirm it sweeps all bands
   and reports PASS (the table is saved to EEPROM).
-- G1 — confirm the physical DFR0669 shows the welcome page.
+- G1 — confirm the physical MSP4021 shows the welcome page.
 - G7 — (**optional eye-check**) while `!CTRL:EXTERNAL` is active, the physical
   LCD shows the one-shot "EXTERNAL CONTROL" splash and then does not update.
-- G8 — tap each on-screen touch zone (BAND/START/MODE/CAL) and confirm the DFR0669
+- G8 — tap each on-screen touch zone (BAND/START/MODE/CAL) and confirm the MSP4021
   updates to the matching page each time.

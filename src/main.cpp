@@ -1,18 +1,18 @@
 // main.cpp
 //
 // UART Bridge between a RigExpert AA-30.ZERO antenna & cable analyzer and an
-// Arduino Uno R4 Minima, with a DFRobot DFR0669 3.5" ILI9488 SPI display and a
-// GT911 capacitive touchscreen UI.
+// Arduino Uno R4 Minima, with a LCDWIKI MSP4021 4.0" ST7796S SPI display and
+// an XPT2046 resistive touchscreen UI (driven by TFT_eSPI).
 //
 // This file is the orchestrator: it owns setup(), loop(), the UI state
 // machine, and PC-command handling. Hard work is delegated to the modules:
 //
-//   display.*      all DFR0669 (ILI9488) rendering (updateDisplay, draw*)
-//   touch.*        GT911 capacitive-touch scan + tap->action classifier
+//   display.*      all MSP4021 (ST7796S) rendering (updateDisplay, draw*)
+//   touch.*        XPT2046 touch scan + tap->action classifier
 //   rigexpert.*    AA-30 UART polling, ASCII parser, scan driver
 //   calibration.*  calibration wizard, EEPROM table, correction
 //   telemetry.*    @STATE/@BAND/@MODE/@CTRL/@CALPHASE/@CALPROG emit helpers
-//   hardware.*     one shared definition of global state + tft/touch + AA_PORT
+//   hardware.*     one shared definition of global state + tft + AA_PORT
 //   config.h       pin map, constants, shared data types
 //
 // The AA-30.ZERO has two UARTs; on the R4 the only reliable path is hardware
@@ -20,17 +20,19 @@
 // The R4's SoftwareSerial cannot drive the D4/D7 pins the analyzer's default
 // UART2 uses (SoftwareSerial.begin() fails), so UART1 + Serial1 is required.
 //
-// Pin map (no overlaps):
+// Pin map (no overlaps; A4/A5 kept free for the I2C battery gauge):
 //   AA-30   TX -> D0 (Serial1 RX)     AA-30   RX -> D1 (Serial1 TX)
-//   Display SCLK -> D13 (SPI SCK)     Display MOSI -> D11 (SPI COPI/MOSI)
+//   Display SCLK -> D13 (SPI SCK)     Display MISO -> D12     Display MOSI -> D11
 //   Display CS  -> D10                Display DC  -> D9
-//   Display RST -> D8                 (BL on by default, not a GPIO)
-//   Touch SDA -> A4   Touch SCL -> A5  (GT911 @ 0x5D, INT/RST optional)
+//   Display RST -> D8                 Backlight LED -> D7
+//   Touch CS -> D6                    Touch IRQ -> A0
+//   Battery gauge I2C -> A4 (SDA) / A5 (SCL)   Low-batt ALRT -> D2
 //
 // 2024, opencode AI
 
 #include <Arduino.h>
 #include <EEPROM.h>
+#include <Wire.h>
 #include "config.h"
 #include "hardware.h"
 #include "telemetry.h"
@@ -261,13 +263,15 @@ void setup() {
   EEPROM.begin();         // calibration persistence
   loadCalibration();
 
-  tft.begin();
+  tft.init();
   tft.setRotation(1);              // landscape: 480x320
-  tft.fillScreen(COLOR_RGB565_BLACK);
+  tft.fillScreen(TFT_BLACK);
 
-  touch.begin();                   // GT911 capacitive touch (I2C)
+  // XPT2046 touch uses TFT_eSPI's built-in driver (shares SPI); calibrate if
+  // output from calibrateTouch() is available, otherwise the default mapping is
+  // used. Nothing to init here beyond the display.
 
-  // LiPo fuel gauge (MAX17043) shares the same I2C bus (address 0x36).
+  // LiPo fuel gauge (MAX17043) is on the I2C bus (address 0x36).
   pinMode(BAT_ALERT_PIN, INPUT_PULLUP);   // active-low low-battery alert
   if (batteryBegin() == 0) {
     batteryPresent = true;

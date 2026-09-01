@@ -2,10 +2,10 @@
 //
 // A single home for the R4's shared global state: the system state machine
 // variables, the scan point buffer, the analyzer line assembler, calibration
-// state, and the physical hardware objects (the DFRobot DFR0669 display, the
-// GT911 touch controller and the AA-30 UART). Every module includes this
-// header and uses the `extern` declarations; the definitions live in
-// hardware.cpp.
+// state, and the physical hardware objects (the LCDWIKI MSP4021 display via
+// TFT_eSPI, the XPT2046 touch it drives, and the AA-30 UART). Every module
+// includes this header and uses the `extern` declarations; the definitions
+// live in hardware.cpp.
 //
 // Keeping all cross-cutting state here breaks the otherwise circular
 // dependency between the display, rigexpert and calibration modules.
@@ -16,17 +16,14 @@
 #define HARDWARE_H
 
 #include <Arduino.h>
+#include <TFT_eSPI.h>
 #include "config.h"
-#include "DFRobot_GDL.h"
-#include "DFRobot_Touch.h"
 
 // ---- hardware objects ------------------------------------------------
 
-// DFRobot DFR0669 3.5" 480x320 TFT (ILI9488, 4-wire SPI).
-extern DFRobot_ILI9488_320x480_HW_SPI tft;
-
-// DFR0669 GT911 capacitive touch (I2C).
-extern DFRobot_Touch_GT911 touch;
+// LCDWIKI MSP4021 4.0" 480x320 TFT (ST7796S) + XPT2046 touch, via TFT_eSPI.
+// TFT_eSPI drives the display and the built-in XPT2046 touch over shared SPI.
+extern TFT_eSPI tft;
 
 // ---- machine-wide state ----------------------------------------------
 

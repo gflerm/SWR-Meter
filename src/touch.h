@@ -1,7 +1,8 @@
 // touch.h
 //
-// DFR0669 GT911 capacitive touch input. Polls the touch controller over I2C and
-// exposes a simple tap classifier that maps a pressed location to a UI action
+// XPT2046 resistive touch input on the LCDWIKI MSP4021 4.0" display, driven via
+// TFT_eSPI's built-in touch support (shares the SPI bus with the display).
+// Exposes a simple tap classifier that maps a pressed location to a UI action
 // (START / BAND / MODE / CAL) or "anywhere" (used to advance the welcome page).
 //
 // 2024, opencode AI

@@ -18,8 +18,8 @@ are called out explicitly rather than faked by automation.
 > **What is this project/system, and what problem does it solve?**
 >
 > [EXAMPLE] A bench SWR meter: an Uno R4 Minima reads a RigExpert AA-30.ZERO
-> antenna analyzer (UART @ 38400) and shows SWR/|Z| on a 3.5" DFRobot DFR0669
-> ILI9488 capacitive-touch display. A Windows-side simulator lets the PC drive
+> antenna analyzer (UART @ 38400) and shows SWR/|Z| on a 3.5" DFRobot MSP4021
+> ST7796S + XPT2046 touch display. A Windows-side simulator lets the PC drive
 > the unit over the USB-CDC port for verification.
 
 ## 2. Scope & non-goals
@@ -45,7 +45,7 @@ are called out explicitly rather than faked by automation.
 | G5 | [calibration wizard] | [single-phase 50-ohm run; reports DONE/FAILED & saves table] | ⚠️ partial | attach 50 Ω load |
 | G6 | [reset → welcome] | [physical reset restores welcome; port re-enumerates] | | ✅ |
 | G7 | [external control] | [`!CTRL:EXTERNAL` reports `@CTRL:external` & bypasses the display; unit stays responsive; `!CTRL:LOCAL` resumes] | ✅ | 👁 LCD splash |
-| G8 | [touchscreen + LCD] | [each on-screen touch zone (BAND/START/MODE/CAL) drives the matching action; the DFR0669 shows the correct page immediately] | | ✅ touch + 👁 LCD |
+| G8 | [touchscreen + LCD] | [each on-screen touch zone (BAND/START/MODE/CAL) drives the matching action; the MSP4021 shows the correct page immediately] | | ✅ touch + 👁 LCD |
 
 ## 4. Architecture
 
@@ -97,7 +97,7 @@ are called out explicitly rather than faked by automation.
 - [G6] press the physical RESET; confirm welcome returns + port re-enumerates.
 - [G5] attach a 50 Ω load, run the wizard, confirm PASS and that the table is saved to EEPROM.
 - [G1/👁] confirm the physical LCD shows the welcome page (host can't see it).
-- [G8/👁] tap each on-screen touch zone (BAND/START/MODE/CAL) and confirm the DFR0669
+- [G8/👁] tap each on-screen touch zone (BAND/START/MODE/CAL) and confirm the MSP4021
   updates to the matching page each time.
 
 ## 7. Results & verification record

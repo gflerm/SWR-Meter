@@ -1,10 +1,11 @@
 // battery.h
 //
-// DFRobot LiPower Shield MAX17043 LiPo fuel gauge over I2C (Wire).
+// DFRobot LiPower Shield MAX17043 LiPo fuel gauge over I2C (Wire, addr 0x36).
 //
 // The shield boosts a 3.7 V LiPo to 5 V to power the R4, and its MAX17043G+U
 // fuel gauge reports battery voltage and state-of-charge. It shares the same
-// I2C bus (A4/A5) as the GT911 touchscreen (0x36 vs 0x5D, no conflict).
+// I2C bus (A4/A5) as nothing else now (the touch is SPI/XPT2046), so the bus
+// is dedicated to the gauge.
 //
 // 2024, opencode AI
 

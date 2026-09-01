@@ -1,9 +1,10 @@
 // display.h
 //
-// All ILI9488 rendering on the DFRobot DFR0669 3.5" display. A single
-// updateDisplay() entry point draws the header + page content for the current
-// state, and the individual draw*() helpers render the welcome, idle prompt,
-// curve, numeric, and calibration screens. Honours the external-control flag.
+// All ST7796S rendering on the LCDWIKI MSP4021 4.0" display (TFT_eSPI). A
+// single updateDisplay() entry point draws the header + page content for the
+// current state, and the individual draw*() helpers render the welcome, idle
+// prompt, curve, numeric, and calibration screens. Honours the external-control
+// flag.
 //
 // 2024, opencode AI
 

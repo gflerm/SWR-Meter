@@ -2,12 +2,13 @@
 """Continuous I2C + battery checker for the SWR meter.
 
 Repeatedly sends !I2C:SCAN and !GET:STATE to the board and prints the
-results, so you can watch the bus come alive as you fix the wiring.
+results, so you can watch the battery-gauge bus come alive as you fix wiring.
 
-When the GT911 touch (0x5D) and MAX17043 gauge (0x36) are both on the bus
-and powered, you should see:
-    @I2C:0x5D 0x36 (count=2)
+When the MAX17043 gauge (0x36) is on the bus and powered, you should see:
+    @I2C:0x36 (count=1)
     @BATT:93,4120
+
+(The touch is now XPT2046 over SPI, so it is NOT on the I2C bus.)
 
 Usage:
     python check_i2c.py [--port COM8] [--interval 2]

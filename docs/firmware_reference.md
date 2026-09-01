@@ -20,10 +20,9 @@ do not depend on each other circularly.
 |------|----------------|
 | `main.cpp` | Orchestrator: `setup()`, `loop()`, the UI state machine, PC command handling. |
 | `config.h` | Pin map, constants, and the shared data types / tables (no state, no objects). |
-| `hardware.h`/`hardware.cpp` | Definitions of all global state, the `tft` display object, the GT911 `touch` object and the AA-30 `Serial1` port. |
-| `display.h`/`display.cpp` | Every DFRobot DFR0669 (ILI9488) render call (`updateDisplay`, `draw*`) + the external-control splash. |
-| `touch.h`/`touch.cpp` | GT911 capacitive touch scan + tap→action classifier. |
-| `battery.h`/`battery.cpp` | LiPower MAX17043 fuel gauge: voltage, state-of-charge, low-batt alert (I2C 0x36). |
+| `hardware.h`/`hardware.cpp` | Definitions of all global state, the `tft` display object (TFT_eSPI) and the AA-30 `Serial1` port. |
+| `display.h`/`display.cpp` | Every MSP4021 (ST7796S) render call (`updateDisplay`, `draw*`) + the external-control splash. |
+| `touch.h`/`touch.cpp` | XPT2046 resistive touch scan + tap→action classifier. |
 | `rigexpert.h`/`rigexpert.cpp` | AA-30 driver: UART polling, ASCII parser, validation, SWR math, `startScan`. |
 | `calibration.h`/`calibration.cpp` | Calibration wizard, EEPROM table save/load, `applyCalibration`. |
 | `telemetry.h`/`telemetry.cpp` | `emit*` telemetry writers, `showStatus`, `isSweepStuck`. |
@@ -40,23 +39,22 @@ hardware object is touched.
 |--------|-----------|-------|
 | AA-30 UART1 TX | D0 (`Serial1` RX) | Analyzer → R4 |
 | AA-30 UART1 RX | D1 (`Serial1` TX) | R4 → Analyzer |
-| Display SCLK | D13 (SPI SCK) | DFR0669 (ILI9488) |
-| Display MOSI | D11 (SPI COPI/MOSI) | DFR0669 (ILI9488) |
-| Display CS | D10 | DFR0669 |
-| Display DC | D9 | DFR0669 |
-| Display RST | D8 | DFR0669 |
-| Display VCC | 3.3–5.5 V | Direct (module is 3.3–5.5 V; **no level shifter**) |
-| Display GND | GND | Direct |
-| Display BL | on by default | Not a GPIO |
-| Touch SDA | A4 | GT911 capacitive touch (I²C, addr 0x5D) |
-| Touch SCL | A5 | GT911 capacitive touch (I²C) |
-| LiPo gauge | A4/A5 | LiPower MAX17043 fuel gauge (I²C, addr 0x36, same bus) |
-| LiPower 5 V out | 5 V | Powers R4 + DFR0669 (3.7 V LiPo boost) |
+| Display SCLK | D13 (SPI SCK) | MSP4021 (ST7796S) |
+| Display MOSI | D11 (SPI COPI/MOSI) | MSP4021 |
+| Display MISO | D12 (SPI CIPO) | MSP4021 (optional) |
+| Display CS | D10 | MSP4021 |
+| Display DC | D9 | MSP4021 |
+| Display RST | D8 | MSP4021 |
+| Backlight LED | D7 | high = on |
+| Touch T_CS | D6 | XPT2046 (shares SPI bus) |
+| Touch T_IRQ | A0 | XPT2046 interrupt |
+| LiPo gauge | A4 (SDA) / A5 (SCL) | LiPower MAX17043 (I²C, addr 0x36) |
+| LiPower 5 V out | 5 V | Powers R4 + MSP4021 |
 | Low-batt ALRT | D2 | MAX17043 alert (active-low), warns at ≤32 % |
 
 AA-30 UART = **38400 baud**. PC/USB CDC `Serial` = **115200 baud**. UI is driven by
-the GT911 **touchscreen** (no physical buttons); the **LiPower shield** powers the
-unit and reports the battery.
+the **XPT2046 resistive touchscreen** (no physical buttons); the **LiPower shield**
+powers the unit and reports the battery.
 
 ---
 
@@ -147,7 +145,7 @@ setup()
     tft begin/rotation, displayWelcome(), emitState("WELCOME")
 
 loop()
- ├─ poll GT911 touch → classify tap (START/BAND/MODE/CAL/any)
+ ├─ poll XPT2046 touch → classify tap (START/BAND/MODE/CAL/any)
  ├─ handlePcCommands()       ← PC soft-buttons + AA-30 passthrough
  ├─ (abort stuck scan / cal sweep → back to IDLE)
  ├─ handleStateMachine()
@@ -163,10 +161,11 @@ loop()
  └─ delay(2)
 ```
 
-> UI is driven by the GT911 capacitive touch (I²C, 0x5D). The lower half of the
-> screen is a row of four touch buttons (BAND | START | MODE | CAL); touching
-> the upper half is "anywhere" (advance/dismiss). `!BTN:*` PC commands still
-> work and are treated as the same actions.
+> UI is driven by the XPT2046 resistive touch (shared SPI with the display; its
+> own CS on D6 / IRQ on A0). The lower half of the screen is a row of four touch
+> buttons (BAND | START | MODE | CAL); touching the upper half is "anywhere"
+> (advance/dismiss). `!BTN:*` PC commands still work and are treated as the same
+> actions.
 
 ### Scans
 `START` in IDLE → `startScan()`: powers the RF board (`ON`), issues
@@ -214,7 +213,7 @@ Where a function lives is shown in the "Module" column.
 ### Touch (touch.cpp)
 | Function | Purpose |
 |----------|---------|
-| `touchReadAction(uint16_t w, uint16_t h)` | Scan the GT911, debounce, and classify the press into a `TouchAction` (START/BAND/MODE/CAL/ANY). |
+| `touchReadAction(uint16_t w, uint16_t h)` | Sample the XPT2046 (`tft.getTouch`), debounce, and classify the press into a `TouchAction` (START/BAND/MODE/CAL/ANY). |
 
 ### Battery (battery.cpp)
 | Function | Purpose |

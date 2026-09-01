@@ -6,13 +6,15 @@
 #include "config.h"
 #include "hardware.h"
 
+#include <Wire.h>
+
 #define MAX17043_ADDR   0x36
 #define MAX17043_VCELL  0x02
 #define MAX17043_SOC    0x04
 #define MAX17043_CONFIG 0x0C
 #define MAX17043_COMMAND 0xFE
 
-// I2C helpers (share the Wire bus used by the GT911 touch).
+// I2C helpers (Wire bus, dedicated to the MAX17043 now that the touch is SPI).
 static void batWrite16(uint8_t reg, uint16_t dat) {
   Wire.beginTransmission(MAX17043_ADDR);
   Wire.write(reg);
