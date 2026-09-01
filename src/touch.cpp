@@ -9,6 +9,10 @@
 // The current press action, latched while a finger is held.
 static TouchAction activeAction = TOUCH_NONE;
 static uint32_t    pressSince    = 0;
+static uint32_t    lastScan      = 0;
+// Poll the touch at a modest rate so its I2C transactions don't starve the
+// MAX17043 fuel-gauge reads on the same shared bus (A4/A5).
+#define TOUCH_SCAN_MS 15
 
 /**
  * @brief Classify a screen coordinate into a UI action by region.
@@ -36,9 +40,15 @@ static TouchAction actionAt(int x, int y, uint16_t w, uint16_t h) {
 }
 
 TouchAction touchReadAction(uint16_t screenW, uint16_t screenH) {
+  // Rate-limit the scan so the fuel-gauge reads on the same bus aren't starved.
+  uint32_t now = millis();
+  if ((now - lastScan) < TOUCH_SCAN_MS) {
+    return TOUCH_NONE;
+  }
+  lastScan = now;
+
   // Scan the touch controller for up to 5 points; we only use the first.
   String pts = touch.scan();
-
   // Parse the first "id,x,y,w,h " token.
   int firstSpace = pts.indexOf(' ');
   String first = (firstSpace > 0) ? pts.substring(0, firstSpace) : pts;
@@ -65,7 +75,6 @@ TouchAction touchReadAction(uint16_t screenW, uint16_t screenH) {
   if (ly < 0) ly = 0; if (ly >= (int)screenH) ly = screenH - 1;
 
   TouchAction act = actionAt(lx, ly, screenW, screenH);
-  uint32_t now = millis();
   if (act != activeAction) {
     activeAction = act;
     pressSince = now;
