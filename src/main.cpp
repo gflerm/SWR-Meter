@@ -114,15 +114,20 @@ void handlePcCommands(bool& s, bool& b, bool& m, bool& c) {
         else if (strcmp(pcCmdBuf, "!I2C:SCAN") == 0) {
           Serial.print("@I2C:");
           uint8_t found = 0;
+          bool busy = false;
           for (uint8_t a = 0x01; a < 0x7F; a++) {
             Wire.beginTransmission(a);
-            if (Wire.endTransmission() == 0) {
+            uint8_t rc = Wire.endTransmission();
+            if (rc == 0) {
               Serial.print("0x");
               Serial.print(a, HEX);
               Serial.print(" ");
               found++;
+            } else if (rc == 2) {
+              busy = true;   // address NACK'd, but a device held SDA
             }
           }
+          if (busy) Serial.print("[bus-busy] ");
           Serial.print("(count=");
           Serial.print((int)found);
           Serial.println(")");
