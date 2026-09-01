@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Simulator GUI for the AA-30.ZERO SWR meter firmware.
 
-Emulates the ILI9341 display on a Windows PC and provides soft buttons that
-inject button presses into the firmware over serial (USB CDC), so the unit can
-be tested/verified without pressing physical buttons. Requires:
+Emulates the DFRobot DFR0669 display on a Windows PC and provides soft controls
+that inject actions into the firmware over serial (USB CDC), so the unit can
+be tested/verified without touching the screen. Requires:
 
   - the firmware built from src/main.cpp (PC telemetry + !BTN: commands)
   - pyserial  (pip install pyserial)

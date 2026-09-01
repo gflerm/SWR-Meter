@@ -1,17 +1,18 @@
 // main.cpp
 //
 // UART Bridge between a RigExpert AA-30.ZERO antenna & cable analyzer and an
-// Arduino Uno R4 Minima, with a Waveshare 2.4" ILI9341 SPI display and four
-// push-button controls.
+// Arduino Uno R4 Minima, with a DFRobot DFR0669 3.5" ILI9488 SPI display and a
+// GT911 capacitive touchscreen UI.
 //
 // This file is the orchestrator: it owns setup(), loop(), the UI state
 // machine, and PC-command handling. Hard work is delegated to the modules:
 //
-//   display.*      all ILI9341 rendering (updateDisplay, draw*)
+//   display.*      all DFR0669 (ILI9488) rendering (updateDisplay, draw*)
+//   touch.*        GT911 capacitive-touch scan + tap->action classifier
 //   rigexpert.*    AA-30 UART polling, ASCII parser, scan driver
 //   calibration.*  calibration wizard, EEPROM table, correction
 //   telemetry.*    @STATE/@BAND/@MODE/@CTRL/@CALPHASE/@CALPROG emit helpers
-//   hardware.*     one shared definition of global state + tft + AA_PORT
+//   hardware.*     one shared definition of global state + tft/touch + AA_PORT
 //   config.h       pin map, constants, shared data types
 //
 // The AA-30.ZERO has two UARTs; on the R4 the only reliable path is hardware
@@ -21,10 +22,10 @@
 //
 // Pin map (no overlaps):
 //   AA-30   TX -> D0 (Serial1 RX)     AA-30   RX -> D1 (Serial1 TX)
-//   Display CLK -> D13 (SPI SCK)      Display DIN -> D11 (SPI COPI/MOSI)
+//   Display SCLK -> D13 (SPI SCK)     Display MOSI -> D11 (SPI COPI/MOSI)
 //   Display CS  -> D10                Display DC  -> D9
-//   Display RST -> D8                 (BL wired to 3.3 V, not a GPIO)
-//   START -> D2   BAND -> D3   MODE -> D4   CAL -> D5   (INPUT_PULLUP, active-low)
+//   Display RST -> D8                 (BL on by default, not a GPIO)
+//   Touch SDA -> A4   Touch SCL -> A5  (GT911 @ 0x5D, INT/RST optional)
 //
 // 2024, opencode AI
 
@@ -36,6 +37,7 @@
 #include "display.h"
 #include "rigexpert.h"
 #include "calibration.h"
+#include "touch.h"
 
 // ======================================================================
 // LOCAL (non-shared) STATE
@@ -219,14 +221,9 @@ void handleStateMachine(bool startPressed, bool bandPressed, bool modePressed, b
 // ======================================================================
 
 /**
- * @brief One-time initialisation: pins, UARTs, EEPROM, display and boot page.
+ * @brief One-time initialisation: UARTs, EEPROM, display, touch and boot page.
  */
 void setup() {
-  pinMode(START_PIN, INPUT_PULLUP);
-  pinMode(BAND_PIN,  INPUT_PULLUP);
-  pinMode(MODE_PIN,  INPUT_PULLUP);
-  pinMode(CAL_PIN,   INPUT_PULLUP);
-
   AA_PORT.begin(38400);   // AA-30 analyzer UART1
   Serial.begin(PC_BAUD);  // PC console / telemetry
 
@@ -234,36 +231,40 @@ void setup() {
   loadCalibration();
 
   tft.begin();
-  tft.setRotation(1);            // landscape (320x240)
-  tft.fillScreen(ILI9341_BLACK);
+  tft.setRotation(1);              // landscape: 480x320
+  tft.fillScreen(COLOR_RGB565_BLACK);
+
+  touch.begin();                   // GT911 capacitive touch (I2C)
 
   displayWelcome();
   emitState("WELCOME");
 }
 
 /**
- * @brief One Arduino main loop iteration: read buttons, step the state
- *        machine, and drain the analyzer UART.
+ * @brief One Arduino main loop iteration: read touch, step the state machine,
+ *        and drain the analyzer UART.
  */
 void loop() {
-  static uint32_t lastDebounce = 0;
   uint32_t now = millis();
 
-  bool startPressed = false, bandPressed = false, modePressed = false, calPressed = false;
-  if (now - lastDebounce >= DEBOUNCE_MS) {
-    // Active-low with INPUT_PULLUP: pressed means LOW.
-    startPressed = digitalRead(START_PIN) == LOW;
-    bandPressed  = digitalRead(BAND_PIN)  == LOW;
-    modePressed  = digitalRead(MODE_PIN)  == LOW;
-    calPressed   = digitalRead(CAL_PIN)   == LOW;
-    lastDebounce = now;
+  // Poll touch and translate the current press into one-shot button edges.
+  TouchAction act = touchReadAction(TFT_W, TFT_H);
+  bool startPressed = false, bandPressed = false;
+  bool modePressed  = false, calPressed  = false;
+  switch (act) {
+    case TOUCH_ANY:   startPressed = bandPressed = modePressed = calPressed = true; break;
+    case TOUCH_START: startPressed = true; break;
+    case TOUCH_BAND:  bandPressed  = true; break;
+    case TOUCH_MODE:  modePressed  = true; break;
+    case TOUCH_CAL:   calPressed   = true; break;
+    default: break;   // TOUCH_NONE
   }
 
   // PC soft-button commands + passthrough (lines starting with '!').
   handlePcCommands(startPressed, bandPressed, modePressed, calPressed);
 
   // Abort a genuinely hung sweep (silent analyzer) so the unit stays
-  // responsive. Buttons never abort a sweep: the START press that begins a
+  // responsive. A press never aborts a sweep: the START tap that begins a
   // sweep would otherwise immediately abort it, and a live sweep updates
   // sweepStart on every point so it never appears stuck while progressing.
   if (isSweepStuck(now)) {

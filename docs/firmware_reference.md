@@ -20,8 +20,9 @@ do not depend on each other circularly.
 |------|----------------|
 | `main.cpp` | Orchestrator: `setup()`, `loop()`, the UI state machine, PC command handling. |
 | `config.h` | Pin map, constants, and the shared data types / tables (no state, no objects). |
-| `hardware.h`/`hardware.cpp` | Definitions of all global state, the `tft` display object and the AA-30 `Serial1` port. |
-| `display.h`/`display.cpp` | Every ILI9341 render call (`updateDisplay`, `draw*`) + the external-control splash. |
+| `hardware.h`/`hardware.cpp` | Definitions of all global state, the `tft` display object, the GT911 `touch` object and the AA-30 `Serial1` port. |
+| `display.h`/`display.cpp` | Every DFRobot DFR0669 (ILI9488) render call (`updateDisplay`, `draw*`) + the external-control splash. |
+| `touch.h`/`touch.cpp` | GT911 capacitive touch scan + tap→action classifier. |
 | `rigexpert.h`/`rigexpert.cpp` | AA-30 driver: UART polling, ASCII parser, validation, SWR math, `startScan`. |
 | `calibration.h`/`calibration.cpp` | Calibration wizard, EEPROM table save/load, `applyCalibration`. |
 | `telemetry.h`/`telemetry.cpp` | `emit*` telemetry writers, `showStatus`, `isSweepStuck`. |
@@ -38,18 +39,19 @@ hardware object is touched.
 |--------|-----------|-------|
 | AA-30 UART1 TX | D0 (`Serial1` RX) | Analyzer → R4 |
 | AA-30 UART1 RX | D1 (`Serial1` TX) | R4 → Analyzer |
-| Display CLK | D13 (SPI SCK) | ILI9341 |
-| Display DIN | D11 (SPI COPI/MOSI) | ILI9341 |
-| Display CS | D10 | ILI9341 |
-| Display DC | D9 | ILI9341 |
-| Display RST | D8 | ILI9341 |
-| Display BL | 3.3 V | Not a GPIO |
-| START button | D2 | INPUT_PULLUP, active-low |
-| BAND button | D3 | INPUT_PULLUP, active-low |
-| MODE button | D4 | INPUT_PULLUP, active-low |
-| CAL button | D5 | INPUT_PULLUP, active-low |
+| Display SCLK | D13 (SPI SCK) | DFR0669 (ILI9488) |
+| Display MOSI | D11 (SPI COPI/MOSI) | DFR0669 (ILI9488) |
+| Display CS | D10 | DFR0669 |
+| Display DC | D9 | DFR0669 |
+| Display RST | D8 | DFR0669 |
+| Display VCC | 3.3–5.5 V | Direct (module is 3.3–5.5 V; **no level shifter**) |
+| Display GND | GND | Direct |
+| Display BL | on by default | Not a GPIO |
+| Touch SDA | A4 | GT911 capacitive touch (I²C, addr 0x5D) |
+| Touch SCL | A5 | GT911 capacitive touch (I²C) |
 
-AA-30 UART = **38400 baud**. PC/USB CDC `Serial` = **115200 baud**.
+AA-30 UART = **38400 baud**. PC/USB CDC `Serial` = **115200 baud**. UI is driven by
+the GT911 **touchscreen** (no physical buttons).
 
 ---
 
@@ -64,8 +66,9 @@ AA-30 UART = **38400 baud**. PC/USB CDC `Serial` = **115200 baud**.
 | `LINE_BUF` | 96 | AA-30 line buffer size |
 | `MAX_POINTS` | 256 | Points retained per scan |
 | `POINTS_PER_SCAN` | 100 | Points requested per band |
-| `DEBOUNCE_MS` | 25 | Button debounce |
+| `TOUCH_DEBOUNCE_MS` | 40 | Touch hold time to register a press |
 | `SCAN_TIMEOUT_MS` | 8000 | Abort a hung sweep after this |
+| `TFT_W` / `TFT_H` | 480 / 320 | Landscape display size |
 | `CAL_PTS_PER_BAND` | 20 | Calibration points per band |
 | `CAL_MAX_RETRIES` | 3 | Single-point re-measures per bogus slot |
 | `CAL_PASS_PCT` | 90 | Minimum % valid points to accept a band |
@@ -138,21 +141,26 @@ setup()
     tft begin/rotation, displayWelcome(), emitState("WELCOME")
 
 loop()
- ├─ read 4 buttons (debounced, active-low)
+ ├─ poll GT911 touch → classify tap (START/BAND/MODE/CAL/any)
  ├─ handlePcCommands()       ← PC soft-buttons + AA-30 passthrough
  ├─ (abort stuck scan / cal sweep → back to IDLE)
  ├─ handleStateMachine()
- │   ├─ WELCOME  → any button → IDLE
+ │   ├─ WELCOME  → any tap → IDLE
  │   ├─ IDLE     → BAND=cycle band, MODE=toggle layout,
  │   │             START=startScan, CAL=startCalibrate
  │   ├─ CALIBRATE→ (measuring → show progress; else)
  │   │             START=calBeginBandSweep, MODE=cancel
- │   ├─ CAL_DONE → any button → IDLE
+ │   ├─ CAL_DONE → any tap → IDLE
  │   ├─ SCANNING → await collected points
  │   └─ DISPLAYING → MODE=toggle layout, START=IDLE
  ├─ pollAnalyzer()            ← assemble AA-30 lines → processLine()
  └─ delay(2)
 ```
+
+> UI is driven by the GT911 capacitive touch (I²C, 0x5D). The lower half of the
+> screen is a row of four touch buttons (BAND | START | MODE | CAL); touching
+> the upper half is "anywhere" (advance/dismiss). `!BTN:*` PC commands still
+> work and are treated as the same actions.
 
 ### Scans
 `START` in IDLE → `startScan()`: powers the RF board (`ON`), issues
@@ -194,8 +202,13 @@ Where a function lives is shown in the "Module" column.
 ### Setup / loop (main.cpp)
 | Function | Purpose |
 |----------|---------|
-| `setup()` | Pin/UART/EEPROM/display init, load calibration, show welcome page. |
-| `loop()` | Read buttons, step the state machine, drain the analyzer UART. |
+| `setup()` | UART/EEPROM/display/touch init, load calibration, show welcome page. |
+| `loop()` | Poll touch, step the state machine, drain the analyzer UART. |
+
+### Touch (touch.cpp)
+| Function | Purpose |
+|----------|---------|
+| `touchReadAction(uint16_t w, uint16_t h)` | Scan the GT911, debounce, and classify the press into a `TouchAction` (START/BAND/MODE/CAL/ANY). |
 
 ### PC telemetry & commands (telemetry.cpp / main.cpp)
 | Function | Module | Purpose |
@@ -206,7 +219,7 @@ Where a function lives is shown in the "Module" column.
 | `emitCtrl()` | telemetry | Emit `@CTRL:external\|local`. |
 | `emitCalPhase()` | telemetry | Emit `@CALPHASE:<n>/<total>`. |
 | `emitCalProgress()` | telemetry | Emit `@CALPROG:band=<b>/<N>,pt=<p>/<P>`. |
-| `handlePcCommands(bool& s, bool& b, bool& m, bool& c)` | main | Process PC serial: `!BTN:*` set button flags; `!CTRL:*` toggle external control; `!GET:STATE` emits state; other lines pass through to the AA-30 in IDLE. |
+| `handlePcCommands(bool& s, bool& b, bool& m, bool& c)` | main | Process PC serial: `!BTN:*` set the corresponding action flags (same as a touch tap); `!CTRL:*` toggle external control; `!GET:STATE` emits state; other lines pass through to the AA-30 in IDLE. |
 | `isSweepStuck(uint32_t now)` | telemetry | Detect a hung sweep (no data for `SCAN_TIMEOUT_MS`). |
 | `showStatus(const char* msg, uint32_t ms)` | telemetry | Show a transient on-screen message. |
 
@@ -288,10 +301,10 @@ Also echoes human-readable lines: `Scanning <band> ...`, `<AA-30 OK>`,
 ### PC → firmware (commands, lines start with `!`)
 | Line | Meaning |
 |------|---------|
-| `!BTN:START` | Press/emulate the START button. |
-| `!BTN:BAND` | Press/emulate the BAND button. |
-| `!BTN:MODE` | Press/emulate the MODE button. |
-| `!BTN:CAL` | Press/emulate the CAL button. |
+| `!BTN:START` | Emulate a START tap. |
+| `!BTN:BAND` | Emulate a BAND tap. |
+| `!BTN:MODE` | Emulate a MODE tap. |
+| `!BTN:CAL` | Emulate a CAL tap. |
 | `!CTRL:EXTERNAL` | Host takes control; bypass display rendering. |
 | `!CTRL:LOCAL` | Return to local control; resume rendering. |
 | `!GET:STATE` | Request `@STATE:`/`@BAND:`/`@MODE:`/`@CTRL:`. |

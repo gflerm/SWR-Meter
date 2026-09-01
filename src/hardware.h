@@ -2,9 +2,10 @@
 //
 // A single home for the R4's shared global state: the system state machine
 // variables, the scan point buffer, the analyzer line assembler, calibration
-// state, and the two physical hardware objects (the ILI9341 display and the
-// AA-30 UART). Every module includes this header and uses the `extern`
-// declarations; the definitions live in hardware.cpp.
+// state, and the physical hardware objects (the DFRobot DFR0669 display, the
+// GT911 touch controller and the AA-30 UART). Every module includes this
+// header and uses the `extern` declarations; the definitions live in
+// hardware.cpp.
 //
 // Keeping all cross-cutting state here breaks the otherwise circular
 // dependency between the display, rigexpert and calibration modules.
@@ -15,14 +16,17 @@
 #define HARDWARE_H
 
 #include <Arduino.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_ILI9341.h>
 #include "config.h"
+#include "DFRobot_GDL.h"
+#include "DFRobot_Touch.h"
 
 // ---- hardware objects ------------------------------------------------
 
-// ILI9341 SPI display (320x240).
-extern Adafruit_ILI9341 tft;
+// DFRobot DFR0669 3.5" 480x320 TFT (ILI9488, 4-wire SPI).
+extern DFRobot_ILI9488_320x480_HW_SPI tft;
+
+// DFR0669 GT911 capacitive touch (I2C).
+extern DFRobot_Touch_GT911 touch;
 
 // ---- machine-wide state ----------------------------------------------
 

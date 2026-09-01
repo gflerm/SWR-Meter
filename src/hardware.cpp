@@ -10,7 +10,8 @@
 
 // ---- hardware objects ------------------------------------------------
 
-Adafruit_ILI9341 tft(TFT_CS, TFT_DC, TFT_RST);
+DFRobot_ILI9488_320x480_HW_SPI tft(/*dc=*/TFT_DC, /*cs=*/TFT_CS, /*rst=*/TFT_RST, /*bl=*/TFT_BL);
+DFRobot_Touch_GT911 touch(/*addr=*/TOUCH_I2C_ADDR, /*rst=*/TOUCH_RST_PIN, /*irq=*/TOUCH_INT_PIN);
 
 // ---- machine-wide state ----------------------------------------------
 

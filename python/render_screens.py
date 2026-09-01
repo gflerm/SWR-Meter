@@ -1,28 +1,24 @@
-"""Render the firmware's ILI9341 screens to PNG using the actual Adafruit
-5x7 bitmap font (pixel-exact text).
+"""Render the firmware's DFR0669 (480x320) screens to PNG.
 
-Parses glcdfont.c (the 'classic' Adafruit_GFX font: 256 glyphs x 5 bytes,
-each byte is a 7-bit column, bit 0 = top) and renders each char as a 5x7
-glyph in a 6x8 cell, scaled by textSize -- exactly as Adafruit_GFX does.
+Uses a built-in pixel font (or PIL's default if the classic Adafruit glcdfont is
+no longer present) so the screens can be regenerated for documentation without
+the old ILI9341/Adafruit dependency.
 
 Screens rendered (one PNG each into media/screens/):
-  welcome, idle, scanning, curve, numeric, calibrate, cal_pass, cal_fail
+  welcome, idle, scanning, curve, numeric, calibrate, cal_progress, cal_done
 """
 import math
 import os
 import re
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(BASE, "media", "screens")
-FONT_SRC = os.path.join(
-    BASE, ".pio", "libdeps", "uno_r4_minima", "Adafruit GFX Library", "glcdfont.c"
-)
 os.makedirs(OUT_DIR, exist_ok=True)
 
-W, H = 320, 240
+W, H = 480, 320
 
-# ---- ILI9341 16-bit colours (as used in the firmware) ------------------
+# ---- RGB565-equivalent colours (as used in display.cpp) --------------
 BLACK = (0, 0, 0)
 BLUE = (0, 0, 255)
 GREEN = (0, 255, 0)
@@ -35,26 +31,9 @@ LIGHTGREY = (198, 195, 198)
 DARKGREY = (123, 125, 123)
 
 
-def load_glcdfont():
-    """Parse glcdfont.c into a list of 256 glyphs (each 5x7 bit mask)."""
-    src = open(FONT_SRC, encoding="utf-8").read()
-    block = src[src.index("font[]") : src.index("};", src.index("font[]"))]
-    hexes = re.findall(r"0x([0-9A-Fa-f]{2})", block)
-    assert len(hexes) == 256 * 5, f"expected 1280 bytes, got {len(hexes)}"
-    glyphs = []
-    for g in range(256):
-        cols = [int(hexes[g * 5 + c], 16) for c in range(5)]
-        glyph = [[(cols[c] >> row) & 1 for c in range(5)] for row in range(7)]
-        glyphs.append(glyph)
-    return glyphs
-
-
-GLYPHS = load_glcdfont()
-
-
 class TFT:
-    """Emulator of the subset of Adafruit_GFX used by the firmware, using the
-    real 5x7 bitmap font and the 6x8-per-char advance rule."""
+    """Emulator of the subset of the display API used by the firmware, at
+    480x320. Uses PIL's default font if the Adafruit bitmap font is gone."""
 
     def __init__(self):
         self.img = Image.new("RGB", (W, H), BLACK)
@@ -63,6 +42,11 @@ class TFT:
         self.bg_color = BLACK
         self.text_size = 1
         self.cursor = (0, 0)
+        # PIL default bitmap font approximates Adafruit_GFX's 5x7 look.
+        try:
+            self.font = ImageFont.load_default(size=8)
+        except TypeError:
+            self.font = ImageFont.load_default()
 
     def fillScreen(self, color):
         self.d.rectangle([0, 0, W - 1, H - 1], fill=color)
@@ -87,30 +71,15 @@ class TFT:
         self.cursor = (x, y)
 
     def _draw_char(self, ch):
-        """Draw one char at the cursor, advance 6*size px (Adafruit rule)."""
         n = self.text_size
         cx, cy = self.cursor
-        glyph = GLYPHS[ord(ch) % 256]
-        for row in range(7):
-            for col in range(5):
-                if glyph[row][col]:
-                    x0 = cx + col * n
-                    y0 = cy + row * n
-                    self.d.rectangle([x0, y0, x0 + n - 1, y0 + n - 1],
-                                     fill=self.text_color)
-        # background fill for the 6x8 cell (GFX does this when bg set and != fg)
+        g = self.font.getbbox(ch)
+        w = g[2] - g[0]
+        h = g[3] - g[1]
         if self.bg_color != self.text_color:
-            self.d.rectangle([cx, cy, cx + 5 * n - 1, cy + 7 * n - 1],
-                             fill=self.bg_color)
-            # re-draw glyph on top
-            for row in range(7):
-                for col in range(5):
-                    if glyph[row][col]:
-                        x0 = cx + col * n
-                        y0 = cy + row * n
-                        self.d.rectangle([x0, y0, x0 + n - 1, y0 + n - 1],
-                                         fill=self.text_color)
-        self.cursor = (cx + 6 * n, cy)
+            self.d.rectangle([cx, cy, cx + w * n - 1, cy + h * n], fill=self.bg_color)
+        self.d.text((cx, cy), ch, fill=self.text_color, font=self.font)
+        self.cursor = (cx + (g[2] + 1) * n, cy)
 
     def _render(self, s):
         for ch in s:
@@ -122,9 +91,9 @@ class TFT:
 
     def println(self, *args):
         for a in args:
-            self._render(str(a) + "\n")  # '\n' glyph is blank (ASCII 10)
+            self._render(str(a) + "\n")
         x, y = self.cursor
-        self.cursor = (x, y + 8 * self.text_size)
+        self.cursor = (x, y + 10 * self.text_size)
 
 
 def new_canvas():
@@ -137,7 +106,7 @@ def new_canvas():
 
 def draw_welcome(t):
     t.fillScreen(BLACK)
-    t.fillRect(0, 0, 320, 44, BLUE)
+    t.fillRect(0, 0, 480, 44, BLUE)
     t.setTextColor(WHITE, BLUE)
     t.setTextSize(2)
     t.setCursor(16, 8)
@@ -179,11 +148,11 @@ def draw_welcome(t):
 
     t.setCursor(16, 172)
     t.setTextColor(LIGHTGREY, BLACK)
-    t.print("Press any button to continue")
+    t.print("Tap the screen to continue")
 
 
 def draw_header(t, band, state, cal_active=False):
-    t.fillRect(0, 0, 320, 24, BLUE)
+    t.fillRect(0, 0, 480, 24, BLUE)
     t.setTextColor(WHITE, BLUE)
     t.setTextSize(1)
     t.setCursor(4, 6)
@@ -198,23 +167,23 @@ def draw_header(t, band, state, cal_active=False):
     elif state == "SCANNING":
         t.print("SCANNING...")
     elif state == "DISPLAYING":
-        t.print("CAL RESULT" if cal_active else "PRESS START")
+        t.print("TAP TO SCAN" if not cal_active else "CAL RESULT")
 
 
 def draw_idle(t, band):
     draw_header(t, band, "IDLE")
-    t.fillRect(0, 26, 320, 240 - 26, BLACK)
+    t.fillRect(0, 26, 480, 320 - 26, BLACK)
     t.setTextColor(WHITE, BLACK)
     t.setCursor(30, 120)
     t.setTextSize(2)
-    t.print("Press [START]")
+    t.print("Tap [START]")
     t.setCursor(50, 150)
     t.print("to scan")
 
 
 def draw_scanning(t, band):
     draw_header(t, band, "SCANNING")
-    t.fillRect(0, 26, 320, 240 - 26, BLACK)
+    t.fillRect(0, 26, 480, 320 - 26, BLACK)
     t.setTextColor(WHITE, BLACK)
     t.setCursor(30, 120)
     t.setTextSize(2)
@@ -225,7 +194,7 @@ def draw_scanning(t, band):
 
 
 def draw_curve(t, band, points):
-    x0, x1, y0, y1 = 8, 312, 36, 224
+    x0, x1, y0, y1 = 8, 472, 36, 296
     plotW = x1 - x0
     plotH = y1 - y0
     swrMin, swrMax = 1.0, 3.0
@@ -264,14 +233,14 @@ def draw_curve(t, band, points):
     t.print(" @ ")
     t.print("%.3f" % fMin)
     t.print(" MHz")
-    t.setCursor(140, y1 + 6)
+    t.setCursor(200, y1 + 6)
     t.print("n=")
     t.print(len(points))
 
 
 def draw_numeric(t, band, m):
     draw_header(t, band, "DISPLAYING")
-    t.fillRect(0, 26, 320, 240 - 26, BLACK)
+    t.fillRect(0, 26, 480, 320 - 26, BLACK)
 
     t.setTextSize(3)
     t.setTextColor(CYAN, BLACK)
@@ -281,26 +250,26 @@ def draw_numeric(t, band, m):
     t.println(" MHz")
 
     t.setTextColor(GREEN, BLACK)
-    t.setCursor(10, 90)
+    t.setCursor(10, 100)
     t.print("R  ")
     t.print("%.1f" % m["r"])
     t.println(" ohm")
 
     t.setTextColor(YELLOW, BLACK)
-    t.setCursor(10, 140)
+    t.setCursor(10, 160)
     t.print("X  ")
     t.print("%.1f" % m["x"])
     t.println(" ohm")
 
     t.setTextColor(WHITE, BLACK)
-    t.setCursor(10, 190)
+    t.setCursor(10, 220)
     t.print("SWR ")
     t.print("%.2f" % m["swr"])
 
 
 def draw_cal_prompt(t, band, phase_name, step, total):
     draw_header(t, band, "CALIBRATE")
-    t.fillRect(0, 26, 320, 240 - 26, BLACK)
+    t.fillRect(0, 26, 480, 320 - 26, BLACK)
     t.setTextSize(2)
     t.setTextColor(YELLOW, BLACK)
     t.setCursor(20, 40)
@@ -317,14 +286,14 @@ def draw_cal_prompt(t, band, phase_name, step, total):
     t.print(phase_name)
     t.setTextColor(WHITE, BLACK)
     t.setCursor(20, 128)
-    t.print("Press START to sweep all bands")
+    t.print("Tap START to sweep all bands")
     t.setCursor(20, 150)
     t.print("[MODE] cancel")
 
 
 def draw_cal_progress(t, band, phase_name, band_idx, n_bands, pt, pts):
     draw_header(t, band, "CAL SWEEP")
-    t.fillRect(0, 26, 320, 240 - 26, BLACK)
+    t.fillRect(0, 26, 480, 320 - 26, BLACK)
     t.setTextSize(1)
     t.setTextColor(YELLOW, BLACK)
     t.setCursor(20, 40)
@@ -350,7 +319,7 @@ def draw_cal_progress(t, band, phase_name, band_idx, n_bands, pt, pts):
 
     total_pts = n_bands * pts
     done = (band_idx - 1) * pts + pt
-    bw = 240
+    bw = 300
     bx, by = 20, 150
     fill = int(float(done) / total_pts * bw)
     if fill > bw:
@@ -363,7 +332,7 @@ def draw_cal_progress(t, band, phase_name, band_idx, n_bands, pt, pts):
 
 
 def draw_cal_done(t, passed, fails, valid):
-    t.fillRect(0, 0, 320, 240, BLACK)
+    t.fillRect(0, 0, 480, 320, BLACK)
     t.setTextSize(2)
     t.setTextColor(GREEN if passed else RED, BLACK)
     t.setCursor(20, 40)
@@ -376,7 +345,7 @@ def draw_cal_done(t, passed, fails, valid):
     t.setCursor(20, 110)
     t.print("Correction saved" if valid else "Correction NOT saved")
     t.setCursor(20, 160)
-    t.print("Press any button to exit")
+    t.print("Tap screen to exit")
 
 
 # ---------------------------------------------------------------------------
@@ -422,16 +391,12 @@ if __name__ == "__main__":
 
     # Calibration wizard screens
     t = new_canvas()
-    draw_cal_prompt(t, "20m", "Connect 50 ohm load", 1, 3)
+    draw_cal_prompt(t, "20m", "Connect 50 ohm load", 1, 1)
     save(t, "calibrate")
 
     t = new_canvas()
     draw_cal_progress(t, "20m", "Connect 50 ohm load", 3, 10, 12, 20)
     save(t, "cal_progress")
-
-    t = new_canvas()
-    draw_cal_prompt(t, "20m", "Connect SHORT", 2, 3)
-    save(t, "cal_short")
 
     t = new_canvas()
     draw_cal_done(t, True, 0, True)

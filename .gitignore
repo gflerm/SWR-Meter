@@ -14,6 +14,10 @@ build/
 
 # PlatformIO
 .pio/
+compile_commands.json
+
+# Generated wiring-diagram preview (regenerate with python/make_wiring_pdf.py)
+docs/wiring_preview.png
 
 # Editors / OS
 .vscode/

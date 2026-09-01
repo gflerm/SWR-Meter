@@ -411,14 +411,14 @@ def main():
 
 MANUAL_CHECKLIST = """MANUAL (hardware) test checklist
 ============================
-G1  Welcome screen: power the board, confirm the ILI9341 shows the SWR METER
-    welcome page + button instructions.
+G1  Welcome screen: power the board, confirm the DFR0669 shows the SWR METER
+    welcome page + touch instructions.
 G5  Calibration: connect a 50 ohm load, run the wizard, confirm it sweeps all
     bands and reports PASS (single-phase; the table is saved to EEPROM).
 G6  Reset: press the physical RESET button on the R4; confirm the welcome
     screen returns and the USB port re-enumerates (reopen the simulator).
-G8  Buttons + LCD: press each physical button (START/BAND/MODE/CAL) and confirm
-    the ILI9341 updates to the matching page (scan, next band, curve/numeric,
+G8  Touch + LCD: tap each on-screen zone (BAND/START/MODE/CAL) and confirm the
+    DFR0669 updates to the matching page (next band, scan, curve/numeric,
     calibration) each time.
 G7  (optional eye-check) In external control the LCD shows a one-shot
     'EXTERNAL CONTROL' splash and then stops updating.

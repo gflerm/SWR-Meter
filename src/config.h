@@ -17,17 +17,22 @@
 // bottleneck while streaming many measurement points.
 #define PC_BAUD 115200
 
-// --- Display (Waveshare 2.4" SPI, ILI9341 320x240). SPI bus is fixed on the
-//     R4 (MOSI=11, SCK=13); only CS/DC/RST are free to choose.
+// --- Display: DFRobot DFR0669 3.5" 480x320 TFT, ILI9488, 4-wire SPI.
+//     The module runs at 3.3-5.5 V so NO level shifter is needed. SPI bus is
+//     fixed on the R4 (MOSI=11, SCK=13); only CS/DC/RST/BL are free to choose.
+//     Native panel is 320x480 (portrait); we rotate to 480x320 landscape.
 #define TFT_CS  10
 #define TFT_DC   9
 #define TFT_RST  8
+#define TFT_BL  0xFF  // GDL_PIN_NC: backlight is on by default; no GPIO control
+#define TFT_W   480  // landscape width after setRotation(1)
+#define TFT_H   320  // landscape height after setRotation(1)
 
-// --- Control buttons (INPUT_PULLUP, pressed = LOW)
-#define START_PIN 2    // Start a scan of the current band
-#define BAND_PIN  3    // Cycle through the HF bands
-#define MODE_PIN  4    // Toggle display mode (curve / numeric)
-#define CAL_PIN   5    // Run a one-off calibration scan (re-zero the reference)
+// --- Capacitive touch: DFR0669 GT911 over hardware I2C (Wire).
+//     R4 Wire = SDA A4, SCL A5. GT911 default address 0x5D; INT/RST unused.
+#define TOUCH_I2C_ADDR 0x5D
+#define TOUCH_INT_PIN  0xFF  // GDL_PIN_NC (int unused)
+#define TOUCH_RST_PIN  0xFF  // GDL_PIN_NC (reset unused)
 
 // --- AA-30 signal analysis
 #define Z0 50.0f                 // system impedance for SWR math (default 50 ohm)
@@ -44,8 +49,8 @@
 #define MAX_POINTS 256
 #define POINTS_PER_SCAN 100   // points requested per band (fits in MAX_POINTS)
 
-// Button debounce (ms).
-#define DEBOUNCE_MS 25
+// Touch hold time before a press is registered, in ms (simple debounce).
+#define TOUCH_DEBOUNCE_MS 40
 
 // If a scan or calibration sweep receives no valid data within this time,
 // abort back to IDLE so the unit never hangs waiting on a silent analyzer.
