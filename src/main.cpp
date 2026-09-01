@@ -111,6 +111,22 @@ void handlePcCommands(bool& s, bool& b, bool& m, bool& c) {
             Serial.println("none");
           }
         }
+        else if (strcmp(pcCmdBuf, "!I2C:SCAN") == 0) {
+          Serial.print("@I2C:");
+          uint8_t found = 0;
+          for (uint8_t a = 0x01; a < 0x7F; a++) {
+            Wire.beginTransmission(a);
+            if (Wire.endTransmission() == 0) {
+              Serial.print("0x");
+              Serial.print(a, HEX);
+              Serial.print(" ");
+              found++;
+            }
+          }
+          Serial.print("(count=");
+          Serial.print((int)found);
+          Serial.println(")");
+        }
       } else if (currentState == STATE_IDLE) {
         // Pass non-command line through to the analyzer.
         AA_PORT.write(pcCmdBuf, strlen(pcCmdBuf));
